@@ -1,0 +1,20 @@
+# ===== 个人数据（绝不发布） =====
+titles.json
+titles.json.bak*
+pinned.json
+.arkcli_glm_cache.json
+.cache/
+config.local.json
+
+# ===== 备份与临时文件 =====
+*.bak
+*.bak_*
+*.tmp
+
+# ===== Python 产物 =====
+__pycache__/
+*.pyc
+
+# ===== OpenClaw 工作区标记文件（空文件，无内容） =====
+displayName
+subject

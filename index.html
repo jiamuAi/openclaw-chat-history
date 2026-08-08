@@ -1,0 +1,1533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>💬 会话历史</title>
+<!-- Session Gallery v1.13.0 | 2026-08-07 开源化：个人配置外置 config.local.json，显示名动态读取 -->
+<style>
+:root {
+  /* ===== 设计令牌 · 深空紫（v1.11 设计焕新） ===== */
+  --bg-app: #0e0e14;
+  --bg-sidebar: #121219;
+  --bg-elevated: #1a1a24;
+  --bg-elevated-2: #23232f;
+  --bg-input: #1c1c28;
+  --border: rgba(255,255,255,0.07);
+  --border-strong: rgba(255,255,255,0.13);
+  --text: #ededf4;
+  --text-dim: #9d9db0;
+  --text-faint: #67677b;
+  --accent: #8b7cf6;
+  --accent-deep: #7c6cf0;
+  --accent-soft: rgba(139,124,246,0.14);
+  --accent-glow: rgba(139,124,246,0.4);
+  --green: #34d399;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.35);
+  --shadow-2: 0 6px 20px rgba(0,0,0,0.4);
+  --shadow-3: 0 16px 48px rgba(0,0,0,0.55);
+  --radius-lg: 16px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --sidebar-w: 320px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --sidebar-bg: linear-gradient(180deg, #15151f 0%, #111118 100%);
+  --bg-header: rgba(16,16,24,0.78);
+  --bg-inset: rgba(255,255,255,0.04);
+  --text-inset: #b8b8cc;
+  --text-inset-dim: #a2a2b8;
+  --bg-code: #0a0a10;
+  --text-code: #d5d5e8;
+  --bg-inline-code: rgba(255,255,255,0.08);
+  --text-inline-code: #e8e6f7;
+  --scrollbar: rgba(255,255,255,0.1);
+  --scrollbar-hover: rgba(255,255,255,0.18);
+  --spinner-track: rgba(255,255,255,0.08);
+  --thinking-text: #93a4bb;
+  --tc-border: #55556a;
+}
+
+/* ===== 浅色主题 · 低饱和 ===== */
+[data-theme="light"] {
+  --bg-app: #f5f5f8;
+  --bg-sidebar: #ececf1;
+  --bg-elevated: #ffffff;
+  --bg-elevated-2: #f0f0f5;
+  --bg-input: #ffffff;
+  --border: rgba(20,20,40,0.08);
+  --border-strong: rgba(20,20,40,0.14);
+  --text: #2b2b34;
+  --text-dim: #71717f;
+  --text-faint: #a2a2ae;
+  --accent: #7c6cf0;
+  --accent-deep: #6d5ce7;
+  --accent-soft: rgba(124,108,240,0.1);
+  --accent-glow: rgba(124,108,240,0.28);
+  --shadow-1: 0 1px 2px rgba(20,20,40,0.06);
+  --shadow-2: 0 6px 20px rgba(20,20,40,0.1);
+  --shadow-3: 0 16px 48px rgba(20,20,40,0.16);
+  --sidebar-bg: linear-gradient(180deg, #f1f1f6 0%, #eaeaf0 100%);
+  --bg-header: rgba(247,247,250,0.82);
+  --bg-inset: rgba(20,20,40,0.045);
+  --text-inset: #565668;
+  --text-inset-dim: #6b6b7d;
+  --bg-code: #f1f1f6;
+  --text-code: #3b3b49;
+  --bg-inline-code: rgba(124,108,240,0.1);
+  --text-inline-code: #5b4fd8;
+  --scrollbar: rgba(20,20,40,0.15);
+  --scrollbar-hover: rgba(20,20,40,0.25);
+  --spinner-track: rgba(20,20,40,0.08);
+  --thinking-text: #4d6c87;
+  --tc-border: #c6c6d3;
+}
+[data-theme="light"] .session-item.active .session-item-title { color: var(--accent-deep); }
+[data-theme="light"] .stats-panel-content { background: #ffffff; }
+[data-theme="light"] .stats-card .num { background: linear-gradient(135deg, #8b7cf6, #5a3fd6); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+[data-theme="light"] .msg-row.user .msg-avatar { background: linear-gradient(135deg, #ececf3, #dcdce6); }
+[data-theme="light"] .chat-empty .empty-glow { background: radial-gradient(circle, rgba(124,108,240,0.14), transparent 65%); }
+[data-theme="light"] .msg-content blockquote { background: rgba(124,108,240,0.05); }
+[data-theme="light"] .tool-group { background: rgba(124,108,240,0.04); }
+[data-theme="light"] .thinking-block { background: rgba(14,116,144,0.06); border-color: rgba(14,116,144,0.28); border-left-color: #0e7490; }
+[data-theme="light"] .thinking-header { color: #0e7490; font-weight: 600; }
+[data-theme="light"] .thinking-header:hover { background: rgba(14,116,144,0.1); }
+[data-theme="light"] .thinking-header .chevron { color: #0e7490; }
+[data-theme="light"] .thinking-body { color: #33475c; border-top-color: rgba(14,116,144,0.2); }
+[data-theme="light"] .msg-content a { color: var(--accent-deep); }
+[data-theme="light"] .tool-group-header, [data-theme="light"] .tool-call-item .tc-name { color: var(--accent-deep); }
+@media (max-width: 768px) {
+  [data-theme="light"] .sidebar { background: #ececf1; }
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  background: var(--bg-app);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: rgba(139,124,246,0.4); color: #fff; }
+
+.app { display: flex; height: 100vh; }
+
+/* ===== SIDEBAR ===== */
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--sidebar-bg);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+}
+.sidebar-header { padding: 18px 16px 14px; border-bottom: 1px solid var(--border); }
+.sidebar-header h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.2px; color: var(--text); display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.version-tag { font-size: 10px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: 20px; letter-spacing: 0.4px; }
+.stats-btn { margin-left: auto; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim); font-size: 13px; width: 30px; height: 30px; border-radius: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.18s var(--ease); }
+.stats-btn:hover { background: var(--bg-elevated-2); border-color: var(--border-strong); color: var(--amber); transform: translateY(-1px); box-shadow: var(--shadow-1); }
+.stats-btn:active { transform: translateY(0); }
+.theme-btn { background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim); font-size: 13px; width: 30px; height: 30px; border-radius: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.18s var(--ease); }
+.theme-btn:hover { background: var(--accent-soft); border-color: rgba(139,124,246,0.35); transform: translateY(-1px); box-shadow: var(--shadow-1); }
+.theme-btn:active { transform: translateY(0); }
+.sidebar-search { position: relative; }
+.sidebar-search input {
+  width: 100%; padding: 9px 12px 9px 34px;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text); font-size: 13px; outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.sidebar-search input::placeholder { color: var(--text-faint); }
+.sidebar-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.sidebar-search .search-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-faint); font-size: 13px; }
+.sidebar-filters { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.filter-chip { padding: 4px 12px; border-radius: 20px; font-size: 11.5px; cursor: pointer; white-space: nowrap; background: var(--bg-elevated); color: var(--text-dim); border: 1px solid var(--border); transition: all 0.15s var(--ease); }
+.filter-chip:hover { background: var(--bg-elevated-2); color: var(--text); }
+.filter-chip.active { background: linear-gradient(135deg, var(--accent-deep), var(--accent)); color: #fff; border-color: transparent; box-shadow: 0 2px 10px var(--accent-glow); }
+.sidebar-stats { padding: 7px 16px; font-size: 11px; color: var(--text-faint); border-bottom: 1px solid var(--border); letter-spacing: 0.3px; }
+.session-list { flex: 1; overflow-y: auto; padding: 8px; }
+.session-list::-webkit-scrollbar { width: 4px; }
+.session-list::-webkit-scrollbar-track { background: transparent; }
+.session-list::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
+.session-item { padding: 11px 12px; cursor: pointer; margin-bottom: 3px; border-radius: 10px; border: 1px solid transparent; transition: all 0.18s var(--ease); position: relative; }
+.session-item:hover { background: var(--bg-elevated); transform: translateX(2px); }
+/* 会话条目间的发丝分割线（选中/置顶/最后一项不显示） */
+.session-item::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: -2px; height: 1px; background: var(--border); pointer-events: none; }
+.session-item:last-child::after, .session-item.active::after, .session-item.pinned::after { display: none; }
+.session-item.active { background: var(--accent-soft); border-color: rgba(139,124,246,0.28); }
+.session-item.active::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; background: linear-gradient(180deg, var(--accent), var(--accent-deep)); border-radius: 2px; box-shadow: 0 0 8px var(--accent-glow); }
+.active-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); margin-right: 6px; vertical-align: middle; box-shadow: 0 0 6px rgba(52,211,153,0.7); animation: pulse-dot 2s ease-in-out infinite; flex-shrink: 0; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.session-item-title { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 62px; position: relative; }
+.session-item.active .session-item-title { color: #fff; }
+.session-item-edit { position: absolute; right: 20px; top: 0; background: transparent; border: none; color: var(--text-faint); cursor: pointer; font-size: 11px; padding: 2px 4px; opacity: 0; transition: opacity 0.15s; }
+.session-item:hover .session-item-edit { opacity: 0.7; }
+.session-item-edit:hover { opacity: 1; color: var(--accent); }
+.session-item-delete { position: absolute; right: 0; top: 0; background: transparent; border: none; color: var(--text-faint); cursor: pointer; font-size: 11px; padding: 2px 4px; opacity: 0; transition: opacity 0.15s; }
+.session-item:hover .session-item-delete { opacity: 0.7; }
+.session-item-delete:hover { opacity: 1; color: var(--red); }
+.session-item-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-faint); }
+.session-item-meta .type-badge { padding: 1px 7px; border-radius: 20px; font-size: 10.5px; font-weight: 500; border: 1px solid var(--border); }
+.session-item-meta .type-badge.webchat { color: #b6a9fa; background: var(--accent-soft); border-color: rgba(139,124,246,0.22); }
+.session-item-meta .type-badge.feishu { color: #6ee7b7; background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.2); }
+.session-item-meta .model-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 20px; font-size: 10.5px; font-weight: 600; background: var(--bg-inset); border: 1px solid var(--border); }
+.session-item-meta .model-badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.model-badge.glm { color: #7aa5f8; }
+.model-badge.ds { color: #b49af8; }
+.model-badge.gem { color: #fbbf24; }
+.model-badge.db { color: #f472b6; }
+.model-badge.kimi { color: #34d399; }
+.model-badge.cl { color: #fbbf24; }
+.model-badge.gpt { color: #4ade80; }
+.model-badge.o { color: #818cf8; }
+.model-badge.mm { color: #f472b6; }
+.model-badge.qwen { color: #2dd4bf; }
+.model-badge.llama { color: #38bdf8; }
+.model-badge.mist { color: #facc15; }
+.model-badge.cohere { color: #c084fc; }
+.model-badge.mimo { color: #7aa5f8; }
+.model-badge.seed { color: #fbbf24; }
+.model-badge.unknown { color: #8a8a9c; }
+.sidebar-load-more { padding: 12px; text-align: center; }
+.sidebar-load-more button { padding: 7px 18px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 20px; color: var(--text-dim); font-size: 12px; cursor: pointer; transition: all 0.15s var(--ease); }
+.sidebar-load-more button:hover { background: var(--bg-elevated-2); color: var(--text); border-color: var(--border-strong); }
+.title-edit-input { width: 100%; padding: 2px 6px; background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; color: var(--text); font-size: 13px; font-weight: 500; outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* ===== CHAT AREA ===== */
+.chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; background: radial-gradient(1200px 600px at 70% -10%, rgba(139,124,246,0.07), transparent 60%), var(--bg-app); }
+.chat-header { padding: 16px 28px; background: var(--bg-header); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; flex-shrink: 0; z-index: 1; }
+.chat-header-title { flex: 1; min-width: 0; }
+.chat-header-title h2 { font-size: 15.5px; font-weight: 650; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.2px; }
+.chat-header-title .meta { font-size: 12px; color: var(--text-dim); margin-top: 3px; display: flex; gap: 14px; flex-wrap: wrap; }
+.chat-body { flex: 1; overflow-y: auto; padding: 28px 0 32px; }
+.chat-body::-webkit-scrollbar { width: 6px; }
+.chat-body::-webkit-scrollbar-track { background: transparent; }
+.chat-body::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+.chat-body::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* Scroll buttons - floating capsule */
+.scroll-fab { position: fixed; right: 24px; bottom: 24px; display: flex; flex-direction: column; z-index: 50; background: var(--bg-header); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border); border-radius: 20px; padding: 3px; box-shadow: var(--shadow-2); opacity: 1; pointer-events: auto; transition: opacity 0.2s; }
+.scroll-fab.visible { opacity: 1; pointer-events: auto; }
+.scroll-fab button { width: 34px; height: 34px; border: none; background: transparent; border-radius: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.18s var(--ease); }
+.scroll-fab button::before { content: ''; width: 8px; height: 8px; border-left: 2px solid var(--text-dim); border-top: 2px solid var(--text-dim); transition: border-color 0.18s; }
+.scroll-fab button.fab-up::before { transform: rotate(45deg); margin-top: 5px; }
+.scroll-fab button.fab-down::before { transform: rotate(225deg); margin-bottom: 5px; }
+.scroll-fab button:hover { background: var(--accent-soft); }
+.scroll-fab button:hover::before { border-color: var(--accent); }
+.scroll-fab button:active { transform: scale(0.92); }
+.scroll-fab .fab-divider { height: 1px; margin: 0 9px; background: var(--border); }
+
+/* Date group headers */
+.date-group-header { padding: 14px 14px 6px; font-size: 11px; font-weight: 600; color: var(--text-faint); letter-spacing: 1.5px; cursor: default; display: flex; align-items: center; gap: 6px; }
+.date-group-header:first-child { padding-top: 6px; }
+
+/* Pinned indicator */
+.session-item.pinned { background: rgba(251,191,36,0.06); border-color: rgba(251,191,36,0.14); }
+.session-item.pinned:hover { background: rgba(251,191,36,0.09); }
+.session-item.pinned.active { background: rgba(251,191,36,0.12); border-color: rgba(251,191,36,0.25); }
+.session-item.pinned .session-item-title::before { content: '📌'; margin-right: 4px; font-size: 11px; }
+.session-item-pin { position: absolute; right: 40px; top: 0; background: transparent; border: none; color: var(--text-faint); cursor: pointer; font-size: 11px; padding: 2px 4px; opacity: 0; transition: opacity 0.15s; }
+.session-item:hover .session-item-pin { opacity: 0.7; }
+.session-item-pin:hover { opacity: 1; color: var(--amber); }
+.session-item.pinned .session-item-pin { opacity: 0.85; color: var(--amber); }
+
+/* Search highlight */
+.msg-content mark, .session-item-title mark { background: rgba(139,124,246,0.4); color: #fff; border-radius: 3px; padding: 0 3px; font-weight: 600; }
+.session-item-title mark { background: rgba(139,124,246,0.25); color: #cfc6fd; font-weight: inherit; }
+.msg-content mark.current { background: var(--accent); color: #fff; box-shadow: 0 0 0 2px var(--accent-glow); }
+
+/* In-content search bar */
+.content-search { position: sticky; top: 0; z-index: 20; display: none; align-items: center; gap: 8px; padding: 8px 16px; background: var(--bg-header); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+.content-search.show { display: flex; }
+.content-search input { flex: 1; max-width: 240px; padding: 6px 11px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; outline: none; background: var(--bg-input); color: var(--text); transition: border-color 0.15s, box-shadow 0.15s; }
+.content-search input::placeholder { color: var(--text-faint); }
+.content-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.content-search .nav-btn { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); transition: all 0.15s; }
+.content-search .nav-btn:hover { background: var(--bg-elevated-2); color: var(--text); }
+.content-search .nav-btn:disabled { opacity: 0.3; cursor: default; }
+.content-search .count { font-size: 12px; color: var(--text-dim); min-width: 40px; text-align: center; }
+.content-search .close-btn { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; font-size: 15px; color: var(--text-dim); }
+.content-search .close-btn:hover { color: var(--text); }
+
+/* Source icon in meta */
+.source-icon { font-size: 13px; opacity: 0.9; }
+
+/* Stats panel */
+.stats-panel { position: fixed; inset: 0; background: rgba(8,8,12,0.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 100; display: none; align-items: center; justify-content: center; }
+.stats-panel.show { display: flex; }
+.stats-panel-content { background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: 20px; padding: 28px 32px 24px; max-width: 480px; width: 90%; box-shadow: var(--shadow-3); max-height: 85vh; overflow-y: auto; }
+.stats-panel-content h2 { font-size: 17px; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; color: var(--text); }
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+.stats-card { padding: 16px; border-radius: 14px; background: var(--bg-inset); border: 1px solid var(--border); }
+.stats-card .num { font-size: 26px; font-weight: 700; background: linear-gradient(135deg, #c4b5fd, var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.stats-card .label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+.stats-breakdown { display: flex; flex-direction: column; gap: 8px; }
+.stats-bar-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+.stats-bar-label { width: 80px; color: var(--text-dim); }
+.stats-bar-track { flex: 1; height: 8px; background: var(--bg-inset); border-radius: 4px; overflow: hidden; }
+.stats-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+.stats-bar-val { width: 32px; text-align: right; font-weight: 600; }
+.stats-close { width: 100%; padding: 11px; border: none; border-radius: 12px; background: linear-gradient(135deg, var(--accent-deep), var(--accent)); color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; margin-top: 24px; transition: all 0.18s var(--ease); }
+.stats-close:hover { transform: translateY(-1px); box-shadow: 0 6px 20px var(--accent-glow); }
+
+.chat-messages { max-width: 780px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 30px; }
+
+/* Message row */
+.msg-row { display: flex; gap: 12px; align-items: flex-start; animation: msg-in 0.35s var(--ease) both; }
+@keyframes msg-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.msg-row.assistant { flex-direction: row; }
+.msg-row.user { flex-direction: row-reverse; }
+
+.msg-avatar { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; border: 1px solid var(--border-strong); }
+.msg-row.assistant .msg-avatar { background: linear-gradient(135deg, var(--accent), var(--accent-deep)); border-color: rgba(139,124,246,0.4); box-shadow: 0 2px 12px rgba(139,124,246,0.35); }
+.msg-row.user .msg-avatar { background: linear-gradient(135deg, #3c3c4e, #2a2a38); }
+
+.msg-bubble { max-width: 78%; min-width: 0; }
+.msg-sender { font-size: 12px; font-weight: 600; margin-bottom: 5px; color: var(--text-faint); letter-spacing: 0.3px; }
+.msg-row.user .msg-sender { text-align: right; }
+
+.msg-content { padding: 13px 17px; border-radius: 14px; font-size: 14px; line-height: 1.8; word-break: break-word; }
+.msg-row.assistant .msg-content { background: var(--bg-elevated); border: 1px solid var(--border); border-top-left-radius: 4px; box-shadow: var(--shadow-1); }
+.msg-row.user .msg-content { background: linear-gradient(135deg, var(--accent-deep), #9b8cf9); color: #fff; border-top-right-radius: 4px; box-shadow: 0 4px 18px rgba(124,108,240,0.3); }
+/* Markdown inside messages */
+.msg-content h1, .msg-content h2, .msg-content h3 { font-size: 15px; font-weight: 700; margin: 12px 0 6px; }
+.msg-content h1 { font-size: 17px; }
+.msg-content p { margin: 0; }
+.msg-content p + p { margin-top: 8px; }
+.msg-content ul, .msg-content ol { margin: 6px 0; padding-left: 20px; }
+.msg-content li { margin: 2px 0; }
+.msg-content code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 12px; background: var(--bg-inline-code); color: var(--text-inline-code); padding: 2px 6px; border-radius: 5px; }
+.msg-content pre { background: var(--bg-code); border: 1px solid var(--border); color: var(--text-code); padding: 12px 14px; border-radius: 10px; overflow-x: auto; margin: 8px 0; font-size: 12px; line-height: 1.55; }
+.msg-content pre code { background: none; padding: 0; color: inherit; font-size: 12px; }
+.msg-content blockquote { border-left: 3px solid var(--accent); background: rgba(139,124,246,0.06); padding: 8px 12px; border-radius: 0 8px 8px 0; margin: 8px 0; color: var(--text-dim); }
+.msg-content table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px; }
+.msg-content th, .msg-content td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+.msg-content th { background: var(--bg-inset); font-weight: 600; }
+.msg-content hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.msg-content a { color: #a594ff; text-decoration: none; }
+.msg-content a:hover { text-decoration: underline; }
+.msg-content strong { font-weight: 700; }
+.msg-content em { font-style: italic; }
+/* User bubble (purple gradient) inner contrast fixes */
+.msg-row.user .msg-content code { background: rgba(255,255,255,0.18); color: #fff; }
+.msg-row.user .msg-content a { color: #e9e4ff; text-decoration: underline; }
+.msg-row.user .msg-content blockquote { border-left-color: rgba(255,255,255,0.45); background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.85); }
+.msg-row.user .msg-content th, .msg-row.user .msg-content td { border-color: rgba(255,255,255,0.25); }
+.msg-row.user .msg-content th { background: rgba(255,255,255,0.12); }
+
+.msg-time { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
+.msg-row.user .msg-time { text-align: right; }
+
+/* ===== TOOL CALL GROUP (collapsible) ===== */
+.tool-group {
+  margin-top: 8px;
+  border: 1px solid rgba(139,124,246,0.16);
+  border-radius: var(--radius);
+  background: rgba(139,124,246,0.05);
+  overflow: hidden;
+}
+.tool-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+  font-size: 13px;
+  color: #b6a9fa;
+}
+.tool-group-header:hover { background: rgba(139,124,246,0.1); }
+.tool-group-header .chevron {
+  font-size: 10px;
+  transition: transform 0.2s;
+  color: var(--accent);
+}
+.tool-group.expanded .tool-group-header .chevron { transform: rotate(90deg); }
+.tool-group-header .tool-summary {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.tool-group-header .tool-icons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+.tool-group-header .tool-icon {
+  padding: 1px 7px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.tool-group-body {
+  display: none;
+  border-top: 1px solid rgba(139,124,246,0.16);
+  padding: 0;
+}
+.tool-group.expanded .tool-group-body { display: block; }
+
+.tool-call-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.tool-call-item:last-child { border-bottom: none; }
+.tool-call-item .tc-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.tool-call-item .tc-name {
+  font-weight: 600;
+  color: #b6a9fa;
+  font-size: 13px;
+}
+.tool-call-item .tc-args {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  color: var(--text-inset);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+}
+.tool-call-item .tc-result {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  color: var(--text-inset-dim);
+  background: var(--bg-inset);
+  padding: 8px 10px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+  border-left: 3px solid var(--tc-border);
+}
+.tool-call-item .tc-result.is-error {
+  border-left-color: var(--red);
+  background: rgba(248,113,113,0.07);
+  color: #fca5a5;
+}
+.tool-call-item .tc-result-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Thinking (collapsible) */
+.thinking-block {
+  margin-top: 8px;
+  border: 1px solid rgba(125,211,252,0.18);
+  border-left: 3px solid rgba(125,211,252,0.5);
+  border-radius: 0 8px 8px 0;
+  background: rgba(125,211,252,0.04);
+  overflow: hidden;
+}
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: #7dd3fc;
+}
+.thinking-header:hover { background: rgba(125,211,252,0.08); }
+.thinking-header .chevron { font-size: 10px; transition: transform 0.2s; color: #7dd3fc; }
+.thinking-block.expanded .thinking-header .chevron { transform: rotate(90deg); }
+.thinking-body {
+  display: none;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--thinking-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px solid rgba(125,211,252,0.14);
+}
+.thinking-block.expanded .thinking-body { display: block; }
+
+/* Empty / Loading */
+.chat-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-dim); position: relative; overflow: hidden; }
+.chat-empty .empty-glow { position: absolute; width: 360px; height: 360px; border-radius: 50%; background: radial-gradient(circle, rgba(139,124,246,0.18), transparent 65%); pointer-events: none; }
+.chat-empty .icon { font-size: 52px; position: relative; filter: drop-shadow(0 8px 28px rgba(139,124,246,0.4)); animation: float 4s ease-in-out infinite; }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+.chat-empty h3 { font-size: 18px; font-weight: 650; color: var(--text); position: relative; letter-spacing: 0.3px; }
+.chat-empty p { font-size: 13px; color: var(--text-dim); position: relative; }
+.chat-empty .empty-hints { display: flex; gap: 10px; margin-top: 12px; position: relative; flex-wrap: wrap; justify-content: center; }
+.chat-empty .empty-hint { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); background: var(--bg-elevated); border: 1px solid var(--border); padding: 6px 13px; border-radius: 20px; }
+.loading-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-dim); }
+.spinner { width: 28px; height: 28px; border: 3px solid var(--spinner-track); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px); background: var(--bg-elevated-2); border: 1px solid var(--border-strong); color: var(--text); padding: 10px 20px; border-radius: 12px; font-size: 13px; box-shadow: var(--shadow-3); z-index: 1000; transition: transform 0.3s var(--ease); pointer-events: none; }
+.toast.show { transform: translateX(-50%) translateY(0); }
+.toast.error { background: #7f1d1d; border-color: rgba(248,113,113,0.4); color: #fecaca; }
+
+@media (max-width: 768px) {
+  :root { --sidebar-w: 280px; }
+  .sidebar { position: absolute; z-index: 10; height: 100%; transform: translateX(-100%); transition: transform 0.3s; background: var(--bg-sidebar); }
+  .sidebar.open { transform: translateX(0); }
+  .chat-area { width: 100%; }
+  .msg-bubble { max-width: 85%; }
+  .chat-messages { padding: 0 12px; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h1>💬 会话历史 <span class="version-tag">v1.13.0</span> <button class="stats-btn" onclick="showStats()" title="数据统计">📊</button><button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="切换深浅主题">☀️</button></h1>
+      <div class="sidebar-search">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-input" placeholder="搜索会话..." />
+      </div>
+    </div>
+    <div class="sidebar-filters" id="filters"></div>
+    <div class="sidebar-stats" id="sidebar-stats"></div>
+    <div class="session-list" id="session-list">
+      <div class="loading-state"><div class="spinner"></div>加载中...</div>
+    </div>
+    <div class="sidebar-load-more" id="load-more" style="display:none;">
+      <button onclick="loadMore()">加载更多</button>
+    </div>
+  </aside>
+
+  <main class="chat-area" id="chat-area">
+    <div class="chat-empty" id="chat-empty">
+      <div class="empty-glow"></div>
+      <div class="icon">💬</div>
+      <h3>今天想回顾哪段对话？</h3>
+      <p>左侧是你的全部历史会话，搜索、筛选、置顶都在手边</p>
+      <div class="empty-hints">
+        <span class="empty-hint">🔍 顶部搜索会话</span>
+        <span class="empty-hint">📌 悬停可置顶常用</span>
+        <span class="empty-hint">⌘F 会话内搜索</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="stats-panel" id="stats-panel" onclick="if(event.target===this)closeStats()">
+  <div class="stats-panel-content">
+    <h2>📊 数据统计</h2>
+    <div id="stats-body">加载中...</div>
+    <button class="stats-close" onclick="closeStats()">关闭</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="marked.min.js"></script>
+<script>
+// Configure marked
+if (window.marked) {
+  marked.setOptions({ breaks: true, gfm: true });
+}
+let allSessions = [];
+let filteredSessions = [];
+let titles = {};
+let pinned = [];
+let currentFilter = 'all';
+let searchQuery = '';
+let currentConvId = null;
+let sidebarLimit = 50;
+let titleQueue = new Set();   // ids currently being titled (avoid duplicate requests)
+let titleDebounceTimer = null; // debounce timer for title generation
+let searchDebounceTimer = null; // debounce timer for search input
+let isSearching = false;       // flag to track if current filter is from search
+let searchMatchIds = null;     // matched session ids from search (for highlight)
+// Display names — served by /api/config (defaults are generic; personalize via config.local.json)
+let ASSISTANT_NAME = '助手';
+let USER_NAME = '用户';
+
+async function init() {
+  try {
+    try {
+      const cr = await fetch('/api/config');
+      const cfg = await cr.json();
+      if (cfg.assistantName) ASSISTANT_NAME = cfg.assistantName;
+      if (cfg.userName) USER_NAME = cfg.userName;
+    } catch(e) { /* keep generic defaults */ }
+    try {
+      const tr = await fetch('/api/titles');
+      titles = await tr.json();
+    } catch(e) { titles = {}; }
+    try {
+      const pr = await fetch('/api/pinned');
+      pinned = await pr.json();
+      if (!Array.isArray(pinned)) pinned = []; // corrupted pinned.json must not blank the list
+    } catch(e) { pinned = []; }
+    const res = await fetch('/api/conversations');
+    const data = await res.json();
+    allSessions = data.sessions || [];
+    // Re-fetch titles after conversations: the server converges OpenClaw-side
+    // renames into titles.json on refresh; keep the UI in sync without a reload.
+    try {
+      const tr2 = await fetch('/api/titles');
+      const freshTitles = await tr2.json();
+      if (freshTitles && Object.keys(freshTitles).length) titles = freshTitles;
+    } catch(e) { /* keep existing titles */ }
+    filteredSessions = allSessions;
+    renderFilters();
+    renderStats();
+    renderSidebar();
+  } catch(e) {
+    document.getElementById('session-list').innerHTML =
+      `<div class="loading-state">❌ 加载失败: ${e.message}</div>`;
+  }
+}
+
+function renderStats() {
+  const total = searchQuery ? filteredSessions.length : allSessions.length;
+  const label = searchQuery ? `搜索到 ${filteredSessions.length} 条（共 ${allSessions.length} 条）` : `共 ${allSessions.length} 条会话`;
+  document.getElementById('sidebar-stats').textContent = label;
+}
+
+function renderFilters() {
+  const types = [
+    { key: 'all', label: '全部' },
+    { key: 'webchat', label: 'WebChat' },
+    { key: 'feishu', label: '飞书' },
+  ];
+  document.getElementById('filters').innerHTML = types.map(t => {
+    const count = t.key === 'all' ? allSessions.length : allSessions.filter(s => s.sessionType === t.key).length;
+    return `<span class="filter-chip ${currentFilter===t.key?'active':''}" onclick="setFilter('${t.key}')">${t.label} ${count}</span>`;
+  }).join('');
+}
+
+function setFilter(type) {
+  currentFilter = type;
+  sidebarLimit = 50;
+  renderFilters();
+  if (searchQuery) {
+    // Re-run search with new filter
+    doSearch();
+  } else {
+    applyFilters();
+  }
+}
+
+document.getElementById('search-input').addEventListener('input', (e) => {
+  searchQuery = e.target.value.trim();
+  sidebarLimit = 50;
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => doSearch(), 300);
+});
+
+// Session list: event delegation — keeps s.id out of inline handlers entirely
+// (a crafted filename could otherwise break out of the onclick attribute).
+document.getElementById('session-list').addEventListener('click', (e) => {
+  if (e.target.closest('.title-edit-input')) return; // don't steal clicks from the title editor
+  const item = e.target.closest('.session-item');
+  if (!item || !item.dataset.id) return;
+  const id = item.dataset.id;
+  const btn = e.target.closest('button');
+  if (btn) {
+    e.stopPropagation();
+    if (btn.classList.contains('session-item-pin')) {
+      togglePin(id);
+    } else if (btn.classList.contains('session-item-edit')) {
+      editTitle(id, btn);
+    } else if (btn.classList.contains('session-item-delete')) {
+      const s = allSessions.find(x => x.id === id);
+      confirmDelete(id, s ? (titles[s.id] || titles[s.sessionId] || s.openclawLabel || s.title) : '');
+    }
+    return;
+  }
+  selectSession(id);
+});
+
+async function doSearch() {
+  searchDebounceTimer = null;
+  const list = document.getElementById('session-list');
+  const currentQuery = searchQuery;
+  
+  if (!currentQuery) {
+    // Empty search = show all
+    isSearching = false;
+    filteredSessions = allSessions;
+    renderStats();
+    renderSidebar();
+    return;
+  }
+  
+  // Show loading state
+  list.innerHTML = '<div class="loading-state"><div class="spinner"></div>搜索中...</div>';
+  isSearching = true;
+  
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(currentQuery)}`);
+    const data = await res.json();
+    // Only update if this search is still relevant
+    if (isSearching && currentQuery === searchQuery) {
+      filteredSessions = data.sessions || [];
+      // Re-fetch titles: the search endpoint re-runs label convergence and may
+      // have folded OpenClaw-side renames back into titles.json; keep the UI
+      // showing the same names OpenClaw does without a full reload.
+      try {
+        const tr = await fetch('/api/titles');
+        const freshTitles = await tr.json();
+        if (freshTitles && Object.keys(freshTitles).length) titles = freshTitles;
+      } catch(e) { /* keep existing titles */ }
+      // Apply the type filter on top of search results (both dimensions stack)
+      if (currentFilter !== 'all') {
+        filteredSessions = filteredSessions.filter(s => s.sessionType === currentFilter);
+      }
+      renderStats();
+      renderSidebar();
+    }
+  } catch(e) {
+    if (isSearching && currentQuery === searchQuery) {
+      list.innerHTML = `<div class="loading-state">❌ 搜索失败: ${e.message}</div>`;
+    }
+  }
+}
+
+function applyFilters() {
+  // This is now only used for type filter (not search)
+  if (searchQuery) {
+    // If there's a search query, search already set filteredSessions
+    // Just apply type filter on top
+    if (currentFilter !== 'all') {
+      filteredSessions = filteredSessions.filter(s => s.sessionType === currentFilter);
+    }
+    renderSidebar();
+    return;
+  }
+  filteredSessions = allSessions.filter(s => {
+    if (currentFilter !== 'all' && s.sessionType !== currentFilter) return false;
+    return true;
+  });
+  renderSidebar();
+}
+
+function getDateGroup(startTime) {
+  if (!startTime) return '更早';
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  const d = new Date(startTime);
+  if (d >= today) return '今天';
+  if (d >= yesterday) return '昨天';
+  // Same year: show month number
+  if (d.getFullYear() === now.getFullYear()) {
+    const monthDiff = (now.getMonth() - d.getMonth()) + (now.getFullYear() - d.getFullYear()) * 12;
+    if (monthDiff <= 3) return `${d.getMonth() + 1}月`;
+    return '更早';
+  }
+  return '更早';
+}
+
+function highlightText(text, query) {
+  if (!query) return escapeHtml(text);
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return escapeHtml(text);
+  return escapeHtml(text.slice(0, idx)) + '<mark>' + escapeHtml(text.slice(idx, idx + query.length)) + '</mark>' + escapeHtml(text.slice(idx + query.length));
+}
+
+function renderSidebar() {
+  const list = document.getElementById('session-list');
+  const loadMore = document.getElementById('load-more');
+  if (filteredSessions.length === 0) {
+    list.innerHTML = '<div class="loading-state">📭 没有匹配的会话</div>';
+    loadMore.style.display = 'none';
+    return;
+  }
+  // Sort: pinned first, then active, then by date
+  const sorted = [...filteredSessions].sort((a, b) => {
+    const aPin = pinned.includes(a.id) ? 1 : 0;
+    const bPin = pinned.includes(b.id) ? 1 : 0;
+    if (aPin !== bPin) return bPin - aPin;
+    if (aPin === 1) return (b.startTime || '').localeCompare(a.startTime || '');
+    const aActive = a.isActive ? 1 : 0;
+    const bActive = b.isActive ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+    return (b.startTime || '').localeCompare(a.startTime || '');
+  });
+  const items = sorted.slice(0, sidebarLimit);
+  const hasMore = sorted.length > sidebarLimit;
+
+  // Group by date (pinned and active have their own groups)
+  let html = '';
+  let lastGroup = '';
+  let pinnedGroupShown = false;
+  let activeGroupShown = false;
+
+  // Find first and last pinned indices in the visible items
+  let firstPinnedIdx = -1, lastPinnedIdx = -1;
+  for (let i = 0; i < items.length; i++) {
+    if (pinned.includes(items[i].id)) {
+      if (firstPinnedIdx === -1) firstPinnedIdx = i;
+      lastPinnedIdx = i;
+    }
+  }
+
+  for (let idx = 0; idx < items.length; idx++) {
+    const s = items[idx];
+    const isPinned = pinned.includes(s.id);
+    const pinPosClass = isPinned ? (idx === firstPinnedIdx ? 'pinned-first ' : '') + (idx === lastPinnedIdx ? 'pinned-last ' : '') : '';
+    // Show "置顶" group header
+    if (isPinned && !pinnedGroupShown) {
+      html += '<div class="date-group-header">📌 置顶</div>';
+      pinnedGroupShown = true;
+    }
+    // Show "活跃" group header
+    if (!isPinned && s.isActive && !activeGroupShown) {
+      html += '<div class="date-group-header">🟢 活跃</div>';
+      activeGroupShown = true;
+    }
+    if (!isPinned && !s.isActive) {
+      const group = getDateGroup(s.startTime);
+      if (group !== lastGroup) {
+        html += `<div class="date-group-header">${escapeHtml(group)}</div>`;
+        lastGroup = group;
+      }
+    }
+
+    const displayTitle = titles[s.id] || titles[s.sessionId] || s.openclawLabel || s.title;
+    const titleHtml = searchQuery ? highlightText(displayTitle, searchQuery) : escapeHtml(displayTitle);
+    const isActive = s.id === currentConvId;
+    const sourceIcon = s.sessionType === 'feishu' ? '✈️' : '💬';
+    const typeBadge = s.sessionType === 'feishu'
+      ? '<span class="type-badge feishu">飞书</span>'
+      : '<span class="type-badge webchat">网页</span>';
+    const modelRaw = s.model || '';
+    let modelAbbr = '', modelClass = 'unknown';
+    if (modelRaw.includes('glm')) { modelAbbr = 'GLM'; modelClass = 'glm'; }
+    else if (modelRaw.includes('deepseek')) { modelAbbr = 'DS'; modelClass = 'ds'; }
+    else if (modelRaw.includes('gemini')) { modelAbbr = 'GM'; modelClass = 'gem'; }
+    else if (modelRaw.includes('doubao') || modelRaw.includes('seed-1') || modelRaw.includes('seed-2')) { modelAbbr = 'DB'; modelClass = 'db'; }
+    else if (modelRaw.includes('claude')) { modelAbbr = 'CL'; modelClass = 'cl'; }
+    else if (modelRaw.includes('gpt-5') || modelRaw.includes('gpt5')) { modelAbbr = 'GPT'; modelClass = 'gpt'; }
+    else if (modelRaw.match(/\bo[0-9]/) || modelRaw.includes('o1') || modelRaw.includes('o3') || modelRaw.includes('o4')) { modelAbbr = 'O'; modelClass = 'o'; }
+    else if (modelRaw.includes('kimi') || modelRaw.includes('k3')) { modelAbbr = 'K3'; modelClass = 'kimi'; }
+    else if (modelRaw.includes('minimax')) { modelAbbr = 'MM'; modelClass = 'mm'; }
+    else if (modelRaw.includes('qwen')) { modelAbbr = 'QW'; modelClass = 'qwen'; }
+    else if (modelRaw.includes('llama')) { modelAbbr = 'LA'; modelClass = 'llama'; }
+    else if (modelRaw.includes('mistral') || modelRaw.includes('codestral') || modelRaw.includes('devstral') || modelRaw.includes('magistral') || modelRaw.includes('pixtral')) { modelAbbr = 'MT'; modelClass = 'mist'; }
+    else if (modelRaw.includes('command')) { modelAbbr = 'CO'; modelClass = 'cohere'; }
+    else if (modelRaw.includes('mimo')) { modelAbbr = 'MI'; modelClass = 'mimo'; }
+    else if (modelRaw.includes('seed') || modelRaw.includes('ark-code')) { modelAbbr = 'SD'; modelClass = 'seed'; }
+    else if (modelRaw) { modelAbbr = '?'; modelClass = 'unknown'; }
+    html += `
+      <div class="session-item ${isActive?'active':''} ${isPinned?'pinned':''} ${pinPosClass}" data-id="${escapeHtml(s.id)}">
+        <div class="session-item-title">
+          ${s.isActive ? '<span class="active-dot"></span>' : ''}
+          ${titleHtml}
+          <button class="session-item-pin" title="置顶">📌</button>
+          <button class="session-item-edit" title="编辑标题">✏️</button>
+          <button class="session-item-delete" title="删除">🗑</button>
+        </div>
+        <div class="session-item-meta">
+          <span class="source-icon">${sourceIcon}</span>
+          ${typeBadge}
+          ${modelAbbr ? `<span class="model-badge ${modelClass}">${modelAbbr}</span>` : ''}
+          <span>${escapeHtml(s.startTimeDisplay || '')}</span>
+          <span>·</span>
+          <span>${s.userMessageCount + s.assistantMessageCount} 条</span>
+        </div>
+      </div>
+    `;
+  }
+  list.innerHTML = html;
+  loadMore.style.display = hasMore ? 'block' : 'none';
+}
+
+function loadMore() { sidebarLimit += 50; renderSidebar(); }
+
+async function confirmDelete(id, title) {
+  // Use native confirm for reliable blocking dialog
+  const ok = confirm(`⚠️ 确认删除这条会话记录？\n\n"${title}"\n\n这个操作会真实删除 OpenClaw 里的历史记录文件，不可恢复！`);
+  if (!ok) return;
+  
+  try {
+    const res = await fetch(`/api/delete/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.ok) {
+      // Remove from local data
+      allSessions = allSessions.filter(s => s.id !== id);
+      filteredSessions = filteredSessions.filter(s => s.id !== id);
+      // Remove title
+      delete titles[id];
+      // If currently viewing this session, clear chat area
+      if (currentConvId === id) {
+        currentConvId = null;
+        document.getElementById('chat-area').innerHTML = `
+          <div class="chat-empty">
+            <div class="empty-glow"></div>
+            <div class="icon">💬</div>
+            <h3>今天想回顾哪段对话？</h3>
+            <p>左侧是你的全部历史会话，搜索、筛选、置顶都在手边</p>
+            <div class="empty-hints">
+              <span class="empty-hint">🔍 顶部搜索会话</span>
+              <span class="empty-hint">📌 悬停可置顶常用</span>
+              <span class="empty-hint">⌘F 会话内搜索</span>
+            </div>
+          </div>`;
+      }
+      renderStats();
+      renderSidebar();
+      showToast('✅ 已删除');
+    } else {
+      showToast(data.error || '删除失败', true);
+    }
+  } catch(e) {
+    showToast('删除失败: ' + e.message, true);
+  }
+}
+
+function editTitle(id, btn) {
+  const titleDiv = btn.parentElement;
+  // Prefer the data source over DOM textContent (which includes the 📌✏️🗑 button texts)
+  const sess = allSessions.find(x => x.id === id);
+  const oldTitle = sess
+    ? (titles[sess.id] || titles[sess.sessionId] || sess.openclawLabel || sess.title)
+    : titleDiv.textContent.replace('📌','').replace('✏️','').replace('🗑','').trim();
+  const wrapper = document.createElement('div');
+  wrapper.className = 'session-item-title';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'title-edit-input';
+  input.value = oldTitle;
+  wrapper.appendChild(input);
+  titleDiv.replaceWith(wrapper);
+  input.focus();
+  input.select();
+  async function save() {
+    const newTitle = input.value.trim();
+    if (newTitle && newTitle !== oldTitle) {
+      try {
+        await fetch(`/api/title/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: newTitle })
+        });
+        titles[id] = newTitle;
+        showToast('✅ 已保存');
+      } catch(e) { showToast('保存失败', true); }
+    }
+    renderSidebar();
+    if (currentConvId === id) {
+      const h2 = document.querySelector('.chat-header-title h2');
+      if (h2) h2.textContent = newTitle;
+    }
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = oldTitle; input.blur(); }
+  });
+}
+
+async function selectSession(id) {
+  currentConvId = id;
+  renderSidebar();
+  const chatArea = document.getElementById('chat-area');
+  chatArea.innerHTML = '<div class="loading-state"><div class="spinner"></div>加载会话内容...</div>';
+  
+  // Cancel pending title debounce (if user switched quickly, don't generate title for the previous session)
+  if (titleDebounceTimer) { clearTimeout(titleDebounceTimer); titleDebounceTimer = null; }
+  
+  try {
+    const res = await fetch(`/api/conversation/${encodeURIComponent(id)}`);
+    const data = await res.json();
+    // User switched to another session while this was loading — discard stale response
+    if (currentConvId !== id) return;
+    if (data.error) {
+      chatArea.innerHTML = `<div class="chat-empty"><div class="icon">❌</div><h3>${data.error}</h3></div>`;
+      return;
+    }
+    const meta = data.metadata || {};
+    
+    // Auto-generate title if none exists - debounced so quick switching won't trigger many requests.
+    // Skip generation when OpenClaw already has a title (label/displayName/subject):
+    // generating would overwrite the OpenClaw-side name the user sees there.
+    let displayTitle = titles[id] || titles[meta.sessionId] || meta.openclawLabel || meta.title || '未命名会话';
+    if (!titles[id] && !titles[meta.sessionId] && !meta.openclawLabel) {
+      displayTitle = '生成标题中...';
+      const titleForId = id;
+      // Only trigger generation if not already in progress
+      if (!titleQueue.has(titleForId)) {
+        titleDebounceTimer = setTimeout(() => {
+          titleDebounceTimer = null;
+          if (currentConvId !== titleForId) return; // user already switched away
+          titleQueue.add(titleForId);
+          fetch(`/api/auto-title/${encodeURIComponent(titleForId)}`, { method: 'POST' })
+            .then(r => r.json())
+            .then(tdata => {
+              if (tdata.title) {
+                titles[titleForId] = tdata.title;
+                // Also save with original sessionId as fallback for reset sessions
+                if (meta.sessionId && meta.sessionId !== titleForId) {
+                  titles[meta.sessionId] = tdata.title;
+                }
+                if (currentConvId === titleForId) {
+                  const h2 = document.querySelector('.chat-header-title h2');
+                  if (h2) h2.textContent = tdata.title;
+                  if (tdata.generated) showToast('✅ 已自动生成标题');
+                }
+                renderSidebar();
+              }
+            })
+            .catch(() => {})
+            .finally(() => { titleQueue.delete(titleForId); });
+        }, 800);
+      }
+    }
+
+    chatArea.innerHTML = `
+      <div class="chat-header">
+        <div class="chat-header-title">
+          <h2>${escapeHtml(displayTitle)}</h2>
+          <div class="meta">
+            <span>🕐 ${escapeHtml(meta.startTimeDisplay || '')}</span>
+            <span>💬 ${data.messageCount} 条消息</span>
+            <span>🪙 Token ${formatTokens(meta.totalTokensDisplay || meta.totalTokens || 0)}${(meta.estimatedTokens && meta.estimatedTokens > (meta.totalTokensDisplay || meta.totalTokens || 0) * 0.1) ? ' ≈' : ''}</span>
+            <span>🧠 ${escapeHtml(meta.model || '未知')}</span>
+          </div>
+        </div>
+      </div>
+      <div class="content-search" id="content-search">
+        <button class="nav-btn" id="cs-prev" onclick="navHighlight(-1)" title="上一个">↑</button>
+        <input type="text" id="cs-input" placeholder="在当前会话中搜索..." oninput="onContentSearchInput(this.value)">
+        <button class="nav-btn" id="cs-next" onclick="navHighlight(1)" title="下一个">↓</button>
+        <span class="count" id="cs-count">0/0</span>
+        <button class="close-btn" onclick="closeContentSearch()">✕</button>
+      </div>
+      <div class="chat-body" id="chat-body" onscroll="updateScrollFab()">
+        <div class="chat-messages">
+          ${renderMessages(data.messages)}
+        </div>
+      </div>
+      <div class="scroll-fab" id="scroll-fab">
+        <button class="fab-up" onclick="scrollChat('top')" title="回到顶部"></button>
+        <div class="fab-divider"></div>
+        <button class="fab-down" onclick="scrollChat('bottom')" title="跳到底部"></button>
+      </div>
+    `;
+    chatArea.querySelector('.chat-body').scrollTop = 0;
+    // Init in-content search (pre-fill from sidebar search, auto-scrolls to first match)
+    initContentSearch();
+  } catch(e) {
+    if (currentConvId !== id) return; // stale request, another session is showing
+    chatArea.innerHTML = `<div class="chat-empty"><div class="icon">❌</div><h3>加载失败</h3><p>${e.message}</p></div>`;
+  }
+}
+
+// ===== IN-CONTENT SEARCH =====
+let contentSearchQuery = '';
+let contentMarks = [];
+let currentMarkIdx = -1;
+
+// Cmd/Ctrl+F shortcut
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+    e.preventDefault();
+    const bar = document.getElementById('content-search');
+    if (!bar) return; // no conversation open yet
+    if (bar.classList.contains('show')) {
+      // Already open, focus input and select all
+      document.getElementById('cs-input').focus();
+      document.getElementById('cs-input').select();
+    } else {
+      bar.classList.add('show');
+      const input = document.getElementById('cs-input');
+      input.value = '';
+      input.focus();
+    }
+  }
+  if (e.key === 'Escape') {
+    closeContentSearch();
+  }
+});
+
+// Enter to go next, Shift+Enter to go prev
+document.addEventListener('keydown', (e) => {
+  if (e.target && e.target.id === 'cs-input') {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      navHighlight(e.shiftKey ? -1 : 1);
+    }
+  }
+});
+
+function initContentSearch() {
+  const bar = document.getElementById('content-search');
+  const input = document.getElementById('cs-input');
+  // Pre-fill with sidebar search query if present
+  if (searchQuery) {
+    input.value = searchQuery;
+    bar.classList.add('show');
+    setTimeout(() => runContentSearch(searchQuery), 200);
+  }
+  // If no sidebar search, bar stays hidden until user presses Cmd+F
+}
+
+function onContentSearchInput(val) {
+  contentSearchQuery = val.trim();
+  runContentSearch(contentSearchQuery);
+}
+
+function runContentSearch(q) {
+  const body = document.getElementById('chat-body');
+  const countEl = document.getElementById('cs-count');
+  if (!body) return;
+  // Clear old marks
+  body.querySelectorAll('mark.current').forEach(m => {
+    m.classList.remove('current');
+    m.tagName = 'MARK'; // ensure it stays as mark
+  });
+  // Remove old marks added by this function
+  body.querySelectorAll('mark[data-cs]').forEach(m => {
+    const parent = m.parentNode;
+    parent.replaceChild(document.createTextNode(m.textContent), m);
+    parent.normalize();
+  });
+  contentMarks = [];
+  currentMarkIdx = -1;
+  if (!q) {
+    countEl.textContent = '0/0';
+    return;
+  }
+  // Find and mark all occurrences in text nodes
+  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      // Skip script/style/textarea nodes
+      const tag = node.parentNode.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || tag === 'INPUT')
+        return NodeFilter.FILTER_REJECT;
+      if (node.textContent.toLowerCase().includes(q.toLowerCase()))
+        return NodeFilter.FILTER_ACCEPT;
+      return NodeFilter.FILTER_REJECT;
+    }
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  const ql = q.toLowerCase();
+  for (const node of nodes) {
+    const text = node.textContent;
+    const parent = node.parentNode;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    let idx = text.toLowerCase().indexOf(ql);
+    while (idx !== -1) {
+      if (idx > last) frag.appendChild(document.createTextNode(text.slice(last, idx)));
+      const mark = document.createElement('mark');
+      mark.setAttribute('data-cs', '1');
+      mark.textContent = text.slice(idx, idx + q.length);
+      frag.appendChild(mark);
+      contentMarks.push(mark);
+      last = idx + q.length;
+      idx = text.toLowerCase().indexOf(ql, last);
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    parent.replaceChild(frag, node);
+  }
+  if (contentMarks.length > 0) {
+    currentMarkIdx = 0;
+    contentMarks[0].classList.add('current');
+    scrollMarkIntoView(contentMarks[0]);
+  }
+  updateContentSearchCount();
+}
+
+function scrollMarkIntoView(mark) {
+  if (!mark) return;
+  // If mark is inside a collapsed element, expand it first
+  let el = mark;
+  let expanded = false;
+  while (el && el !== document.body) {
+    if (el.classList && (el.classList.contains('tool-group-body') || el.classList.contains('thinking-body'))) {
+      const wrapper = el.closest('.tool-group, .thinking-block');
+      if (wrapper && !wrapper.classList.contains('expanded')) {
+        wrapper.classList.add('expanded');
+        expanded = true;
+      }
+    }
+    el = el.parentElement;
+  }
+  // If we expanded something, wait for next frame so layout is updated before scrolling
+  if (expanded) {
+    requestAnimationFrame(() => {
+      const body = document.getElementById('chat-body');
+      if (!body || !mark) return;
+      const bodyRect = body.getBoundingClientRect();
+      const markRect = mark.getBoundingClientRect();
+      const offset = markRect.top - bodyRect.top - bodyRect.height / 2 + markRect.height / 2;
+      body.scrollTo({ top: body.scrollTop + offset, behavior: 'smooth' });
+    });
+    return;
+  }
+  const body = document.getElementById('chat-body');
+  if (!body) return;
+  const bodyRect = body.getBoundingClientRect();
+  const markRect = mark.getBoundingClientRect();
+  const offset = markRect.top - bodyRect.top - bodyRect.height / 2 + markRect.height / 2;
+  body.scrollTo({ top: body.scrollTop + offset, behavior: 'smooth' });
+}
+
+function navHighlight(dir) {
+  if (contentMarks.length === 0) return;
+  contentMarks[currentMarkIdx]?.classList.remove('current');
+  currentMarkIdx = (currentMarkIdx + dir + contentMarks.length) % contentMarks.length;
+  contentMarks[currentMarkIdx].classList.add('current');
+  scrollMarkIntoView(contentMarks[currentMarkIdx]);
+  updateContentSearchCount();
+}
+
+function updateContentSearchCount() {
+  const countEl = document.getElementById('cs-count');
+  if (contentMarks.length === 0) {
+    countEl.textContent = '0/0';
+    document.getElementById('cs-prev').disabled = true;
+    document.getElementById('cs-next').disabled = true;
+  } else {
+    countEl.textContent = `${currentMarkIdx + 1}/${contentMarks.length}`;
+    document.getElementById('cs-prev').disabled = false;
+    document.getElementById('cs-next').disabled = false;
+  }
+}
+
+function closeContentSearch() {
+  const bar = document.getElementById('content-search');
+  if (!bar) return; // no conversation open yet
+  bar.classList.remove('show');
+  document.getElementById('cs-input').value = '';
+  runContentSearch('');
+}
+
+// ===== SCROLL CONTROL =====
+function scrollChat(dir) {
+  const body = document.getElementById('chat-body');
+  if (!body) return;
+  body.scrollTo({ top: dir === 'top' ? 0 : body.scrollHeight, behavior: 'smooth' });
+}
+function updateScrollFab() {
+  const body = document.getElementById('chat-body');
+  const fab = document.getElementById('scroll-fab');
+  if (!body || !fab) return;
+  // Always visible (2026-08-05): keep the top/bottom buttons
+  // permanently shown instead of only after scrolling 200px.
+  fab.classList.add('visible');
+}
+
+// ===== RENDER MESSAGES - merge consecutive assistant tool-only messages =====
+function renderMessages(messages) {
+  let html = '';
+  let i = 0;
+  while (i < messages.length) {
+    const msg = messages[i];
+
+    if (msg.role === 'assistant' && (!msg.text || !msg.text.trim()) && msg.tools && msg.tools.length > 0) {
+      // Start of a tool-call group - collect consecutive tool-only assistant messages
+      const group = [];
+      while (i < messages.length) {
+        const m = messages[i];
+        if (m.role === 'assistant' && (!m.text || !m.text.trim()) && m.tools && m.tools.length > 0) {
+          group.push(m);
+          i++;
+        } else {
+          break;
+        }
+      }
+      html += renderToolGroup(group);
+    } else {
+      html += renderMessage(msg);
+      i++;
+    }
+  }
+  return html;
+}
+
+function renderToolGroup(group) {
+  // Flatten all tools from all messages in the group
+  const allTools = [];
+  const allTimes = [];
+  group.forEach(msg => {
+    msg.tools.forEach(t => allTools.push(t));
+    if (msg.time) allTimes.push(msg.time);
+  });
+
+  const toolIcons = allTools.map(t => `<span class="tool-icon">${escapeHtml(t.name)}</span>`).join('');
+  const timeStr = allTimes.length ? allTimes[0] : '';
+
+  // Generate unique ID for this group
+  const groupId = 'tg_' + Math.random().toString(36).substr(2, 9);
+
+  return `
+    <div class="msg-row assistant">
+      <div class="msg-avatar">🌳</div>
+      <div class="msg-bubble">
+        <div class="msg-sender">${ASSISTANT_NAME}</div>
+        <div class="tool-group" id="${groupId}">
+          <div class="tool-group-header" onclick="toggleGroup('${groupId}')">
+            <span class="chevron">▶</span>
+            <span class="tool-summary">🔧 ${allTools.length} 个工具调用</span>
+            <div class="tool-icons">${toolIcons}</div>
+          </div>
+          <div class="tool-group-body">
+            ${allTools.map(t => `
+              <div class="tool-call-item">
+                <div class="tc-header"><span class="tc-name">🔧 ${escapeHtml(t.name)}</span></div>
+                <div class="tc-args">${escapeHtml(formatToolArgs(t.preview))}</div>
+                ${renderToolResult(t)}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        ${timeStr ? `<div class="msg-time">${timeStr}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function formatToolArgs(preview) {
+  if (!preview) return '';
+  try {
+    const obj = JSON.parse(preview);
+    return JSON.stringify(obj, null, 2);
+  } catch {
+    return preview;
+  }
+}
+
+function formatTokens(n) {
+  if (!n || n < 0) return '0';
+  if (n >= 100000000) return (n / 100000000).toFixed(2) + ' 亿';
+  if (n >= 10000) return (n / 10000).toFixed(1) + ' 万';
+  return n.toLocaleString();
+}
+
+function renderToolResult(tool) {
+  if (!tool.result && tool.result !== '') return '';
+  const errClass = tool.isError ? ' is-error' : '';
+  const label = tool.result ? '📋 输出结果' : '';
+  return `
+    <div class="tc-result${errClass}">
+      <div class="tc-result-label">${label}</div>
+      ${escapeHtml(tool.result)}
+    </div>
+  `;
+}
+
+function toggleGroup(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('expanded');
+}
+
+function renderMessage(msg) {
+  const isUser = msg.role === 'user';
+  const avatar = isUser ? '👤' : '🌳';
+  const sender = isUser ? USER_NAME : ASSISTANT_NAME;
+
+  let contentHtml = '';
+  if (msg.text) {
+    contentHtml = `<div class="msg-content">${renderMarkdown(msg.text)}</div>`;
+  }
+
+  // If this message also has tools (in addition to text), show them as a collapsible group
+  let toolsHtml = '';
+  if (msg.tools && msg.tools.length > 0) {
+    const groupId = 'tg_' + Math.random().toString(36).substr(2, 9);
+    const toolIcons = msg.tools.map(t => `<span class="tool-icon">${escapeHtml(t.name)}</span>`).join('');
+    toolsHtml = `
+      <div class="tool-group" id="${groupId}">
+        <div class="tool-group-header" onclick="toggleGroup('${groupId}')">
+          <span class="chevron">▶</span>
+          <span class="tool-summary">🔧 ${msg.tools.length} 个工具调用</span>
+          <div class="tool-icons">${toolIcons}</div>
+        </div>
+        <div class="tool-group-body">
+          ${msg.tools.map(t => `
+            <div class="tool-call-item">
+              <div class="tc-header"><span class="tc-name">🔧 ${escapeHtml(t.name)}</span></div>
+              <div class="tc-args">${escapeHtml(formatToolArgs(t.preview))}</div>
+                ${renderToolResult(t)}
+              </div>
+            `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // Thinking block (collapsible)
+  let thinkingHtml = '';
+  if (msg.thinking) {
+    const thId = 'th_' + Math.random().toString(36).substr(2, 9);
+    thinkingHtml = `
+      <div class="thinking-block" id="${thId}">
+        <div class="thinking-header" onclick="document.getElementById('${thId}').classList.toggle('expanded')">
+          <span class="chevron">▶</span>
+          <span>💭 思考过程</span>
+        </div>
+        <div class="thinking-body">${escapeHtml(msg.thinking)}</div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="msg-row ${msg.role}">
+      <div class="msg-avatar">${avatar}</div>
+      <div class="msg-bubble">
+        <div class="msg-sender">${sender}</div>
+        ${contentHtml}
+        ${toolsHtml}
+        ${thinkingHtml}
+        ${msg.time ? `<div class="msg-time">${escapeHtml(msg.time)}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  let html;
+  if (window.marked) {
+    try { html = sanitizeHtml(marked.parse(text)); } catch(e) { html = escapeHtml(text); }
+  } else {
+    html = escapeHtml(text);
+  }
+  return html;
+}
+
+// Whitelist-based HTML sanitizer (marked v15 passes raw HTML through by default).
+// Strips dangerous tags, on* handlers and javascript:/data: URLs before innerHTML.
+function sanitizeHtml(html) {
+  const ALLOWED_TAGS = new Set(['P','H1','H2','H3','H4','H5','H6','UL','OL','LI','BLOCKQUOTE',
+    'CODE','PRE','STRONG','EM','B','I','DEL','S','SUP','SUB','A','TABLE','THEAD','TBODY','TR',
+    'TH','TD','HR','BR','IMG','SPAN','DIV']);
+  const ALLOWED_ATTRS = {
+    'A': ['href', 'title'],
+    'IMG': ['src', 'alt', 'title', 'width', 'height'],
+    'CODE': ['class'],
+    'SPAN': ['class'],
+    'TH': ['align'],
+    'TD': ['align'],
+  };
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const clean = (node) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === Node.COMMENT_NODE) { node.removeChild(child); continue; }
+      if (child.nodeType !== Node.ELEMENT_NODE) continue;
+      const tag = child.tagName;
+      if (!ALLOWED_TAGS.has(tag)) {
+        // Drop the tag but keep its inner text (script/style bodies become inert text)
+        node.replaceChild(document.createTextNode(child.textContent || ''), child);
+        continue;
+      }
+      const allowed = ALLOWED_ATTRS[tag] || [];
+      for (const attr of Array.from(child.attributes)) {
+        const name = attr.name.toLowerCase();
+        if (name.startsWith('on') || !allowed.includes(name)) { child.removeAttribute(attr.name); continue; }
+        if (name === 'href' || name === 'src') {
+          const v = attr.value.trim().toLowerCase();
+          const ok = v.startsWith('http://') || v.startsWith('https://') || v.startsWith('mailto:')
+            || v.startsWith('#') || v.startsWith('/') || (tag === 'IMG' && v.startsWith('data:image/'));
+          if (!ok) child.removeAttribute(attr.name);
+        }
+      }
+      if (tag === 'A') { child.setAttribute('rel', 'noopener'); child.setAttribute('target', '_blank'); }
+      clean(child);
+    }
+  };
+  clean(doc.body);
+  return doc.body.innerHTML;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+async function togglePin(id) {
+  try {
+    const res = await fetch(`/api/pin/${encodeURIComponent(id)}`, { method: 'PUT' });
+    const data = await res.json();
+    if (data.ok) {
+      pinned = data.pinned;
+      renderSidebar();
+      showToast(data.action === 'pinned' ? '📌 已置顶' : '已取消置顶');
+    }
+  } catch(e) { showToast('操作失败', true); }
+}
+
+async function showStats() {
+  document.getElementById('stats-panel').classList.add('show');
+  const body = document.getElementById('stats-body');
+  body.innerHTML = '<div style="text-align:center;padding:20px;">加载中...</div>';
+  try {
+    const res = await fetch('/api/stats');
+    const s = await res.json();
+    const colors = ['#8b7cf6','#34d399','#fbbf24','#f87171','#60a5fa','#f472b6','#a78bfa','#2dd4bf'];
+    const typeLabels = { webchat: 'WebChat', feishu: '飞书', cron: '定时任务', subagent: '子Agent', dreaming: '做梦' };
+    let typeBars = Object.entries(s.typeBreakdown).sort((a,b) => b[1]-a[1]).map(([k,v],i) => {
+      const pct = (v / s.totalConversations * 100).toFixed(0);
+      return `<div class="stats-bar-row"><span class="stats-bar-label">${typeLabels[k]||k}</span><div class="stats-bar-track"><div class="stats-bar-fill" style="width:${pct}%;background:${colors[i%colors.length]}"></div></div><span class="stats-bar-val">${v}</span></div>`;
+    }).join('');
+    let modelBars = Object.entries(s.modelBreakdown).sort((a,b) => b[1]-a[1]).map(([k,v],i) => {
+      const pct = (v / s.totalConversations * 100).toFixed(0);
+      return `<div class="stats-bar-row"><span class="stats-bar-label">${k}</span><div class="stats-bar-track"><div class="stats-bar-fill" style="width:${pct}%;background:${colors[i%colors.length]}"></div></div><span class="stats-bar-val">${v}</span></div>`;
+    }).join('');
+    body.innerHTML = `
+      <div class="stats-grid">
+        <div class="stats-card"><div class="num">${s.totalConversations}</div><div class="label">总会话数</div></div>
+        <div class="stats-card"><div class="num">${s.totalMessages}</div><div class="label">总消息数</div></div>
+        <div class="stats-card"><div class="num">${(s.totalChars / 10000).toFixed(1)}<span style="font-size:14px;font-weight:400">万</span></div><div class="label">总字数</div></div>
+        <div class="stats-card"><div class="num">${(s.totalTokens / 100000000).toFixed(2)}<span style="font-size:14px;font-weight:400">亿</span></div><div class="label">总 Token ${s.glmSource === 'arkcli' ? '📡' : '≈'}</div></div>
+      </div>
+      ${s.earliestDate ? `<div style="font-size:12px;color:var(--text-dim);margin-bottom:16px;text-align:center;">时间范围：${escapeHtml(s.earliestDate)} ~ ${escapeHtml(s.latestDate)}</div>` : ''}
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;">渠道分布</div>
+      <div class="stats-breakdown" style="margin-bottom:16px;">${typeBars}</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;">模型分布</div>
+      <div class="stats-breakdown">${modelBars}</div>
+    `;
+  } catch(e) { body.innerHTML = `<p>加载失败: ${e.message}</p>`; }
+}
+function closeStats() { document.getElementById('stats-panel').classList.remove('show'); }
+
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('error', !!isError);
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ===== THEME TOGGLE =====
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  const b = document.getElementById('theme-btn');
+  if (b) b.textContent = t === 'light' ? '🌙' : '☀️';
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  try { localStorage.setItem('sg-theme', cur); } catch(e) {}
+  applyTheme(cur);
+}
+// Apply saved theme before first render to avoid a theme flash
+try { applyTheme(localStorage.getItem('sg-theme') || 'dark'); } catch(e) { applyTheme('dark'); }
+
+init();
+</script>
+</body>
+</html>
