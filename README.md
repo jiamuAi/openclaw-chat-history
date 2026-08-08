@@ -94,8 +94,8 @@
 ## 快速启动
 
 ```bash
-git clone <本仓库地址>
-cd session-gallery
+git clone https://github.com/jiamuAi/openclaw-chat-history.git
+cd openclaw-chat-history
 python3 server.py
 ```
 
