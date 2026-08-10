@@ -572,14 +572,12 @@ async function init() {
       const tr = await fetch('/api/titles');
       titles = await tr.json();
     } catch(e) { titles = {}; }
-    try {
-      const pr = await fetch('/api/pinned');
-      pinned = await pr.json();
-      if (!Array.isArray(pinned)) pinned = []; // corrupted pinned.json must not blank the list
-    } catch(e) { pinned = []; }
     const res = await fetch('/api/conversations');
     const data = await res.json();
     allSessions = data.sessions || [];
+    // 置顶状态以服务器收敛结果为准（OpenClaw pinnedAt ↔ pinned.json 双向同步），
+    // 每次刷新会话列表即自动跟上 OpenClaw 侧的置顶变化
+    pinned = allSessions.filter(s => s.pinned).map(s => s.id);
     // Re-fetch titles after conversations: the server converges OpenClaw-side
     // renames into titles.json on refresh; keep the UI in sync without a reload.
     try {
@@ -1465,6 +1463,8 @@ async function togglePin(id) {
     const data = await res.json();
     if (data.ok) {
       pinned = data.pinned;
+      const s = allSessions.find(x => x.id === id);
+      if (s) s.pinned = (data.action === 'pinned');
       renderSidebar();
       showToast(data.action === 'pinned' ? '📌 已置顶' : '已取消置顶');
     }

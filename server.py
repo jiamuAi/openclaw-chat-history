@@ -2,12 +2,12 @@
 """HTTP server for OpenClaw session gallery with in-memory full-text search."""
 
 # ============================================================
-# 版本: 1.13.1
-# 更新: 2026-08-08
-# 说明: 开源物料补齐——新增 MIT LICENSE、README 界面预览截图（虚构演示数据）、
-#       README 结构优化（功能一览表 + 功能说明序号）；代码功能无变更
+# 版本: 1.14.0
+# 更新: 2026-08-10
+# 说明: 置顶双向联动——Gallery 置顶与 OpenClaw sessions.json 的 pinnedAt
+#       双写 + 刷新收敛（同标题单一数据源模式），会话数据新增 pinned 标记
 # ============================================================
-VERSION = '1.13.1'
+VERSION = '1.14.0'
 
 import json
 import os
@@ -405,6 +405,9 @@ class ConversationCache:
         self.arkcli_glm_total = None     # real GLM token total from arkcli (None = not fetched)
         self.arkcli_glm_fetch_time = 0   # timestamp of last successful fetch
         self.session_labels = {}    # sid -> OpenClaw label (sessions.json)
+        self.session_pins = {}      # sid -> pinnedAt (OpenClaw 置顶标记，sessions.json)
+        self.registry_sids = set()  # sids present in sessions.json (用于区分"未置顶"与"未登记")
+        self.pinned_set = set()     # uids -> 收敛后的置顶状态
         self.titles_map = {}        # uid/sid -> gallery title (titles.json)
         self._titles_dirty = set()  # uids whose titles.json entry needs write-back
 
@@ -477,6 +480,8 @@ class ConversationCache:
         """
         self.active_session_ids = set()
         self.session_labels = {}    # sid -> label
+        self.session_pins = {}      # sid -> pinnedAt
+        self.registry_sids = set()
         try:
             with open(self.SESSIONS_JSON, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -496,6 +501,12 @@ class ConversationCache:
                     if not label:
                         label = (v.get('subject') or '').strip()
                     sid = v.get('sessionId', '')
+                    if sid:
+                        self.registry_sids.add(sid)
+                        # OpenClaw 置顶标记：entry 带 pinnedAt（epoch ms）即置顶
+                        pinned_at = v.get('pinnedAt')
+                        if pinned_at:
+                            self.session_pins[sid] = pinned_at
                     if label and sid:
                         self.session_labels[sid] = label
                     updated = v.get('updatedAt', 0)
@@ -657,6 +668,7 @@ class ConversationCache:
         self.sessions.sort(key=lambda x: x.get('startTime', '') or '', reverse=True)
         self.loaded = True
         self._flush_titles()
+        self._converge_pins()
         print(f"[Cache] Loaded {len(self.sessions)} conversations, "
               f"{sum(len(v) for v in self.full_text.values()) / 1024:.1f} KB text in memory")
 
@@ -671,6 +683,46 @@ class ConversationCache:
         for s in self.sessions:
             s['openclawLabel'] = self._converge_label(s['id'], s.get('sessionId', ''))
         self._flush_titles()
+
+    def _converge_pins(self):
+        """Converge pin state with OpenClaw (single source of truth).
+
+        OpenClaw marks a pinned session with `pinnedAt` in sessions.json.
+        Gallery pin/unpin dual-writes pinnedAt (see toggle_pin), so both
+        sides normally agree; differences mean OpenClaw changed later:
+        - Entry has pinnedAt but pinned.json lacks the uid -> pinned in
+          OpenClaw, fold into pinned.json.
+        - Entry exists WITHOUT pinnedAt but pinned.json has the uid ->
+          unpinned in OpenClaw, remove from pinned.json.
+        - Sessions with no registry entry (old/archived) keep gallery state.
+        Also stamps each session dict with a 'pinned' flag for the frontend.
+        """
+        pinned_path = os.path.join(BASE_DIR, 'pinned.json')
+        with PINNED_LOCK:
+            pinned = read_json_file(pinned_path, [])
+            if not isinstance(pinned, list):
+                pinned = []
+            pinned_set = set(pinned)
+            changed = False
+            for s in self.sessions:
+                uid = s['id']
+                sid = s.get('sessionId', '')
+                if not sid:
+                    continue
+                if sid in self.session_pins and uid not in pinned_set:
+                    pinned.insert(0, uid)
+                    pinned_set.add(uid)
+                    changed = True
+                elif (sid in self.registry_sids and sid not in self.session_pins
+                      and uid in pinned_set):
+                    pinned = [x for x in pinned if x != uid]
+                    pinned_set.discard(uid)
+                    changed = True
+            if changed:
+                atomic_write_json(pinned_path, pinned)
+            self.pinned_set = pinned_set
+        for s in self.sessions:
+            s['pinned'] = s['id'] in self.pinned_set
 
     def refresh_new(self):
         """Check for new/changed session files and update cache."""
@@ -776,6 +828,7 @@ class ConversationCache:
             self.sessions.sort(key=lambda x: x.get('startTime', '') or '', reverse=True)
             print(f"[Cache] Added {new_count} new, updated {updated_count} changed conversations")
         self._flush_titles()
+        self._converge_pins()
 
     def search(self, query):
         """Full-text search across all conversations. Returns list of session ids that match."""
@@ -1164,6 +1217,41 @@ class GalleryHandler(BaseHTTPRequestHandler):
         except Exception:
             pass  # Non-critical: Gallery still works without this sync
 
+    def _sync_pin_to_openclaw(self, conv_id, is_pinned):
+        """Sync Gallery pin state to OpenClaw sessions.json (`pinnedAt`).
+
+        Matches strictly by sessionId (never by sessionKey alone): multiple
+        historical sessions can share one sessionKey, so key-based matching
+        could pin the wrong (live) conversation in OpenClaw.
+        """
+        try:
+            meta = next((s for s in cache.sessions if s['id'] == conv_id), None)
+            if not meta:
+                return
+            sid = meta.get('sessionId', '')
+            if not sid:
+                return
+            with open(cache.SESSIONS_JSON, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return
+            updated = False
+            for k, v in data.items():
+                if isinstance(v, dict) and v.get('sessionId') == sid:
+                    if is_pinned:
+                        v['pinnedAt'] = int(datetime.now().timestamp() * 1000)
+                    else:
+                        v.pop('pinnedAt', None)
+                    updated = True
+                    break
+            if updated:
+                tmp = cache.SESSIONS_JSON + '.tmp'
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False)
+                os.replace(tmp, cache.SESSIONS_JSON)
+        except Exception:
+            pass  # Non-critical: Gallery pin still works without this sync
+
     def update_title(self, conv_id):
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length)
@@ -1196,6 +1284,17 @@ class GalleryHandler(BaseHTTPRequestHandler):
                 pinned.insert(0, conv_id)
                 action = 'pinned'
             atomic_write_json(pinned_path, pinned)
+        # 双写 OpenClaw：置顶状态与 sessions.json 的 pinnedAt 联动（同标题同步模式）
+        self._sync_pin_to_openclaw(conv_id, action == 'pinned')
+        # 立即更新内存态，下次 /api/conversations 即为最新
+        if action == 'pinned':
+            cache.pinned_set.add(conv_id)
+        else:
+            cache.pinned_set.discard(conv_id)
+        for s in cache.sessions:
+            if s['id'] == conv_id:
+                s['pinned'] = (action == 'pinned')
+                break
         self.send_json({'ok': True, 'action': action, 'pinned': pinned})
 
     def serve_stats(self):
