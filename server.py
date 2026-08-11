@@ -2,12 +2,12 @@
 """HTTP server for OpenClaw session gallery with in-memory full-text search."""
 
 # ============================================================
-# 版本: 1.14.0
-# 更新: 2026-08-10
-# 说明: 置顶双向联动——Gallery 置顶与 OpenClaw sessions.json 的 pinnedAt
-#       双写 + 刷新收敛（同标题单一数据源模式），会话数据新增 pinned 标记
+# 版本: 1.15.0
+# 更新: 2026-08-11
+# 说明: AI 标题补位同步——OpenClaw 无任何标题时，AI 生成的标题同步写入
+#       sessions.json（label+displayName）；有标题仍绝不覆盖
 # ============================================================
-VERSION = '1.14.0'
+VERSION = '1.15.0'
 
 import json
 import os
@@ -1039,12 +1039,12 @@ class GalleryHandler(BaseHTTPRequestHandler):
                 titles[sid] = title
             atomic_write_json(titles_path, titles)
 
-        # NOTE: AI-generated titles intentionally do NOT sync to OpenClaw's
-        # label/displayName. Only a manual rename (update_title) is an explicit
-        # user intent that should change the OpenClaw-side name. Syncing AI
-        # titles here used to pollute sessions.json labels (e.g. a gallery AI
-        # title shadowing OpenClaw's own auto title) — that's what caused the
-        # "gallery shows a different name than OpenClaw" confusion.
+        # NOTE: AI-generated titles sync to OpenClaw ONLY in the case proven
+        # safe by the guard above: OpenClaw has no label/displayName/subject
+        # for this session, so the AI title fills a blank rather than
+        # shadowing any OpenClaw-side name. (v1.10.0 originally never synced
+        # AI titles; v1.15.0 fills the blank so OpenClaw shows the same name.)
+        self._sync_label_to_openclaw(conv_id, title)
         self.send_json({'title': title, 'generated': True})
 
     def do_PUT(self):
@@ -1191,12 +1191,16 @@ class GalleryHandler(BaseHTTPRequestHandler):
                 data = json.load(f)
             if not isinstance(data, dict):
                 return
-            # Write to matching sessionKey entry, or find by sessionId.
-            # Write BOTH label and displayName: the dashboard renders
-            # displayName first, so a gallery rename must update it too,
-            # otherwise OpenClaw would keep showing the old auto title.
+            # Write to the sessionKey entry ONLY when its sessionId matches:
+            # several historical sessions (e.g. Feishu after a reset) share one
+            # sessionKey, and writing to the live entry would rename the wrong
+            # conversation. Otherwise fall back to a sessionId search.
             updated = False
-            if sk and sk in data and isinstance(data[sk], dict):
+            if (sk and sk in data and isinstance(data[sk], dict)
+                    and data[sk].get('sessionId') == sid):
+                # Write BOTH label and displayName: the dashboard renders
+                # displayName first, so updating only label would leave
+                # OpenClaw showing the old name.
                 data[sk]['label'] = label
                 data[sk]['displayName'] = label
                 updated = True
