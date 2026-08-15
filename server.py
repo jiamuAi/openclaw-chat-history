@@ -2,16 +2,19 @@
 """HTTP server for OpenClaw session gallery with in-memory full-text search."""
 
 # ============================================================
-# 版本: 1.15.0
-# 更新: 2026-08-11
-# 说明: AI 标题补位同步——OpenClaw 无任何标题时，AI 生成的标题同步写入
-#       sessions.json（label+displayName）；有标题仍绝不覆盖
+# 版本: 1.15.2
+# 更新: 2026-08-15
+# 说明: 统一用量核算——会话文件按模型拆分 GLM/非GLM 桶，
+#       非 GLM 用文件真实 usage，GLM 以火山平台真实总量为准
+#       （消除文件 GLM usage 与平台数据的重复计入；配套
+#       OpenClaw 全模型开启 supportsUsageInStreaming）
 # ============================================================
-VERSION = '1.15.0'
+VERSION = '1.15.2'
 
 import json
 import os
 import sys
+import time
 import re
 import subprocess
 import glob
@@ -27,6 +30,11 @@ BEIJING_TZ = timezone(timedelta(hours=8))
 # Locks + helpers for safe concurrent JSON state file access (titles.json / pinned.json)
 TITLES_LOCK = Lock()
 PINNED_LOCK = Lock()
+# Serializes read-modify-write of OpenClaw's sessions.json (label / pinnedAt sync)
+SESSIONS_LOCK = Lock()
+# Serializes the full-disk stats scans so concurrent /api/stats requests
+# don't duplicate the same ~1-2s scan (result is cached anyway)
+STATS_SCAN_LOCK = Lock()
 
 def read_json_file(path, default):
     """Read a JSON file; return default when missing or corrupt."""
@@ -244,6 +252,9 @@ def extract_session_meta(filepath, session_key):
     assistant_msg_count = 0
     total_tokens = 0      # reported tokens from usage field
     estimated_tokens = 0  # estimated tokens (input context + output) for zero-usage messages
+    tokens_glm = 0        # reported + estimated tokens from GLM models (files unreliable -> platform data wins)
+    tokens_non_glm = 0    # reported + estimated tokens from non-GLM models (files reliable)
+    cur_model = ''        # per-message model (tracks model_change events for token bucketing)
     total_chars = 0
     running_chars = 0     # cumulative chars in current context window (resets on compaction)
     SYSTEM_CTX = 40000    # estimated system prompt tokens (workspace context ~40K chars in prompt)
@@ -263,8 +274,10 @@ def extract_session_meta(filepath, session_key):
                 if et == 'session' and not start_time:
                     ts = obj.get('timestamp')
                     if ts: start_time = ts
-                if et == 'model_change' and not model:
-                    model = obj.get('modelId', '')
+                if et == 'model_change':
+                    cur_model = obj.get('modelId', '')
+                    if not model:
+                        model = cur_model
                 if et == 'compaction':
                     # Context reset to summary (compaction keeps a summary, not zero)
                     summary = obj.get('summary', '')
@@ -278,6 +291,7 @@ def extract_session_meta(filepath, session_key):
 
                     if role not in ('user', 'assistant'):
                         continue
+                    is_glm = 'glm' in (cur_model or '').lower()
                     if role == 'user':
                         content = msg.get('content', '')
                         text = ''
@@ -301,8 +315,13 @@ def extract_session_meta(filepath, session_key):
                         usage = msg.get('usage', {})
                         reported = (usage.get('totalTokens', usage.get('total', 0)) or 0) if isinstance(usage, dict) else 0
                         total_tokens += reported
+                        if is_glm: tokens_glm += reported
+                        else: tokens_non_glm += reported
                         if reported == 0 and text:
-                            estimated_tokens += max(1, int(len(text) / 2))
+                            est = max(1, int(len(text) / 2))
+                            estimated_tokens += est
+                            if is_glm: tokens_glm += est
+                            else: tokens_non_glm += est
                     elif role == 'assistant':
                         content = msg.get('content', '')
                         est_text_parts = []  # for token estimation
@@ -328,13 +347,18 @@ def extract_session_meta(filepath, session_key):
                         usage = msg.get('usage', {})
                         reported = (usage.get('totalTokens', usage.get('total', 0)) or 0) if isinstance(usage, dict) else 0
                         total_tokens += reported
+                        if is_glm: tokens_glm += reported
+                        else: tokens_non_glm += reported
                         if reported == 0:
                             # Output estimate: text + thinking + tool call JSON
                             est_out = len(''.join(est_text_parts)) + est_tool_chars
                             out_tokens = max(1, int(est_out / 1.5)) if est_out > 0 else 10
                             # Input estimate: system prompt + accumulated context in this window, capped at limit
                             ctx_tokens = min(int(running_chars / 3) + SYSTEM_CTX, CTX_LIMIT)
-                            estimated_tokens += ctx_tokens + out_tokens
+                            est = ctx_tokens + out_tokens
+                            estimated_tokens += est
+                            if is_glm: tokens_glm += est
+                            else: tokens_non_glm += est
                         # Track running chars for context estimation (after estimation, for next call)
                         for t in est_text_parts:
                             running_chars += len(t)
@@ -380,6 +404,8 @@ def extract_session_meta(filepath, session_key):
         'sessionKey': session_key,
         'totalTokens': total_tokens,
         'estimatedTokens': estimated_tokens,
+        'tokensGlm': tokens_glm,
+        'tokensNonGlm': tokens_non_glm,
         'totalTokensDisplay': total_tokens + estimated_tokens,
         'totalChars': total_chars,
         'fullText': '\n'.join(full_text_parts).lower(),  # for case-insensitive search
@@ -404,6 +430,7 @@ class ConversationCache:
         self.active_session_ids = set()  # sessionIds active within idle window
         self.arkcli_glm_total = None     # real GLM token total from arkcli (None = not fetched)
         self.arkcli_glm_fetch_time = 0   # timestamp of last successful fetch
+        self.arkcli_glm_fetch_date = ''  # 'YYYY-MM-DD' of the cache, exposed to the UI
         self.session_labels = {}    # sid -> OpenClaw label (sessions.json)
         self.session_pins = {}      # sid -> pinnedAt (OpenClaw 置顶标记，sessions.json)
         self.registry_sids = set()  # sids present in sessions.json (用于区分"未置顶"与"未登记")
@@ -544,6 +571,11 @@ class ConversationCache:
             
             for filepath in data_files:
                 basename = os.path.basename(filepath)
+                if '.checkpoint.' in basename:
+                    # Periodic OpenClaw snapshot, not a distinct conversation:
+                    # loading it would create a duplicate session with a
+                    # corrupted sid (e.g. 'sid.checkpoint'). Skip.
+                    continue
                 if '.jsonl' == basename[-6:] and '.deleted' not in basename and '.lock' not in basename:
                     sid = basename.replace('.jsonl', '')
                     uid = sid
@@ -556,9 +588,6 @@ class ConversationCache:
                 elif '.jsonl.deleted.' in basename:
                     sid = basename.split('.jsonl.deleted.')[0]
                     uid = f"{sid}__deleted_{basename.split('.jsonl.deleted.')[1]}"
-                elif '.checkpoint.' in basename and basename.endswith('.jsonl'):
-                    sid = basename.split('.checkpoint.')[0]
-                    uid = basename.replace('.jsonl', '')
                 else:
                     continue
                 sk = self._get_session_key(filepath, sid)
@@ -597,8 +626,15 @@ class ConversationCache:
         
         return results
 
+    ARKCLI_GLM_MAX_AGE_DAYS = 40  # staleness gate for the arkcli GLM cache
+
     def _fetch_arkcli_glm_total(self):
-        """Read cached GLM token total (updated externally via arkcli)."""
+        """Read cached GLM token total (updated externally via arkcli).
+
+        Stale caches (older than ARKCLI_GLM_MAX_AGE_DAYS, judged by fetched_at
+        or file mtime) are ignored so a months-old total is never presented as
+        today's "real" usage — the UI falls back to the ≈ estimate instead.
+        """
         cache_file = os.path.join(BASE_DIR, '.arkcli_glm_cache.json')
         try:
             if os.path.exists(cache_file):
@@ -606,8 +642,23 @@ class ConversationCache:
                     data = json.load(f)
                 total = data.get('glm_total', 0)
                 if total > 0:
+                    fetched_ts = None
+                    fetched = data.get('fetched_at', '')
+                    if fetched:
+                        try:
+                            fetched_ts = datetime.strptime(fetched, '%Y-%m-%d %H:%M:%S')
+                        except Exception:
+                            fetched_ts = None
+                    if fetched_ts is None:
+                        fetched_ts = datetime.fromtimestamp(os.path.getmtime(cache_file))
+                    age_days = (datetime.now() - fetched_ts).total_seconds() / 86400
+                    if age_days > self.ARKCLI_GLM_MAX_AGE_DAYS:
+                        print(f"[Stats] arkcli GLM cache stale ({age_days:.0f} days old), "
+                              f"falling back to estimated tokens")
+                        return None
                     self.arkcli_glm_total = total
                     self.arkcli_glm_fetch_time = os.path.getmtime(cache_file)
+                    self.arkcli_glm_fetch_date = fetched[:10] if fetched else ''
                     return total
         except Exception:
             pass
@@ -655,6 +706,8 @@ class ConversationCache:
                 'isActive': sid in self.active_session_ids,
                 'totalTokens': meta.get('totalTokens', 0),
                 'estimatedTokens': meta.get('estimatedTokens', 0),
+                'tokensGlm': meta.get('tokensGlm', 0),
+                'tokensNonGlm': meta.get('tokensNonGlm', 0),
                 'totalTokensDisplay': meta.get('totalTokensDisplay', meta.get('totalTokens', 0)),
                 'totalChars': meta.get('totalChars', 0),
             }
@@ -766,6 +819,7 @@ class ConversationCache:
                             'endTimeDisplay': meta['endTimeDisplay'],
                             'firstUserMessage': meta['firstUserMessage'],
                             'title': meta['title'],
+                            'openclawLabel': self._converge_label(uid, sid),
                             'model': meta['model'],
                             'messageCount': meta['messageCount'],
                             'userMessageCount': meta['userMessageCount'],
@@ -810,6 +864,8 @@ class ConversationCache:
                 'isActive': sid in self.active_session_ids,
                 'totalTokens': meta.get('totalTokens', 0),
                 'estimatedTokens': meta.get('estimatedTokens', 0),
+                'tokensGlm': meta.get('tokensGlm', 0),
+                'tokensNonGlm': meta.get('tokensNonGlm', 0),
                 'totalTokensDisplay': meta.get('totalTokensDisplay', meta.get('totalTokens', 0)),
                 'totalChars': meta.get('totalChars', 0),
             }
@@ -1177,7 +1233,12 @@ class GalleryHandler(BaseHTTPRequestHandler):
         })
 
     def _sync_label_to_openclaw(self, conv_id, label):
-        """Sync Gallery title to OpenClaw session label in sessions.json."""
+        """Sync Gallery title to OpenClaw session label in sessions.json.
+
+        The read-modify-write of sessions.json is serialized with SESSIONS_LOCK
+        so concurrent Gallery requests can't lose each other's updates (OpenClaw
+        itself is an external writer and can still race — a known tradeoff of
+        the dual-write design)."""
         try:
             # Find this session in cache to get sessionId and sessionKey
             meta = next((s for s in cache.sessions if s['id'] == conv_id), None)
@@ -1187,37 +1248,38 @@ class GalleryHandler(BaseHTTPRequestHandler):
             sk = meta.get('sessionKey', '')
             if not sid:
                 return
-            with open(cache.SESSIONS_JSON, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                return
-            # Write to the sessionKey entry ONLY when its sessionId matches:
-            # several historical sessions (e.g. Feishu after a reset) share one
-            # sessionKey, and writing to the live entry would rename the wrong
-            # conversation. Otherwise fall back to a sessionId search.
-            updated = False
-            if (sk and sk in data and isinstance(data[sk], dict)
-                    and data[sk].get('sessionId') == sid):
-                # Write BOTH label and displayName: the dashboard renders
-                # displayName first, so updating only label would leave
-                # OpenClaw showing the old name.
-                data[sk]['label'] = label
-                data[sk]['displayName'] = label
-                updated = True
-            else:
-                # Fallback: find by sessionId
-                for k, v in data.items():
-                    if isinstance(v, dict) and v.get('sessionId') == sid:
-                        data[k]['label'] = label
-                        data[k]['displayName'] = label
-                        updated = True
-                        break
-            if updated:
-                # Atomic write
-                tmp = cache.SESSIONS_JSON + '.tmp'
-                with open(tmp, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False)
-                os.replace(tmp, cache.SESSIONS_JSON)
+            with SESSIONS_LOCK:
+                with open(cache.SESSIONS_JSON, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if not isinstance(data, dict):
+                    return
+                # Write to the sessionKey entry ONLY when its sessionId matches:
+                # several historical sessions (e.g. Feishu after a reset) share one
+                # sessionKey, and writing to the live entry would rename the wrong
+                # conversation. Otherwise fall back to a sessionId search.
+                updated = False
+                if (sk and sk in data and isinstance(data[sk], dict)
+                        and data[sk].get('sessionId') == sid):
+                    # Write BOTH label and displayName: the dashboard renders
+                    # displayName first, so updating only label would leave
+                    # OpenClaw showing the old name.
+                    data[sk]['label'] = label
+                    data[sk]['displayName'] = label
+                    updated = True
+                else:
+                    # Fallback: find by sessionId
+                    for k, v in data.items():
+                        if isinstance(v, dict) and v.get('sessionId') == sid:
+                            data[k]['label'] = label
+                            data[k]['displayName'] = label
+                            updated = True
+                            break
+                if updated:
+                    # Atomic write, preserving the file's 2-space indent format
+                    tmp = cache.SESSIONS_JSON + '.tmp'
+                    with open(tmp, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    os.replace(tmp, cache.SESSIONS_JSON)
         except Exception:
             pass  # Non-critical: Gallery still works without this sync
 
@@ -1235,24 +1297,25 @@ class GalleryHandler(BaseHTTPRequestHandler):
             sid = meta.get('sessionId', '')
             if not sid:
                 return
-            with open(cache.SESSIONS_JSON, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                return
-            updated = False
-            for k, v in data.items():
-                if isinstance(v, dict) and v.get('sessionId') == sid:
-                    if is_pinned:
-                        v['pinnedAt'] = int(datetime.now().timestamp() * 1000)
-                    else:
-                        v.pop('pinnedAt', None)
-                    updated = True
-                    break
-            if updated:
-                tmp = cache.SESSIONS_JSON + '.tmp'
-                with open(tmp, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False)
-                os.replace(tmp, cache.SESSIONS_JSON)
+            with SESSIONS_LOCK:
+                with open(cache.SESSIONS_JSON, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if not isinstance(data, dict):
+                    return
+                updated = False
+                for k, v in data.items():
+                    if isinstance(v, dict) and v.get('sessionId') == sid:
+                        if is_pinned:
+                            v['pinnedAt'] = int(datetime.now().timestamp() * 1000)
+                        else:
+                            v.pop('pinnedAt', None)
+                        updated = True
+                        break
+                if updated:
+                    tmp = cache.SESSIONS_JSON + '.tmp'
+                    with open(tmp, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    os.replace(tmp, cache.SESSIONS_JSON)
         except Exception:
             pass  # Non-critical: Gallery pin still works without this sync
 
@@ -1301,6 +1364,313 @@ class GalleryHandler(BaseHTTPRequestHandler):
                 break
         self.send_json({'ok': True, 'action': action, 'pinned': pinned})
 
+    # ---- stats scan caches ----
+    # Class-level, NOT instance-level: every HTTP request creates a fresh
+    # GalleryHandler (protocol_version=HTTP/1.0), so instance attributes would
+    # never survive between requests and the 120s cache would be dead code.
+    _stats_scan_ts = 0.0
+    _stats_scan_cache = None
+    _segment_scan_ts = 0.0
+    _segment_scan_cache = 0
+
+    def _iter_stats_files(self):
+        """Yield (filepath, kind) for the SAME file set the conversation list uses:
+        jsonl variants (live / reset / bak / deleted) first, then trajectory files
+        for sids that have no jsonl data file. Checkpoint snapshots are skipped
+        (they are not distinct conversations)."""
+        seen_sids = set()
+        for session_dir in SESSION_DIRS:
+            if not os.path.isdir(session_dir):
+                continue
+            for fp in sorted(glob.glob(os.path.join(session_dir, '*.jsonl*'))):
+                if '.trajectory.' in fp or '.path.' in fp:
+                    continue
+                basename = os.path.basename(fp)
+                if '.checkpoint.' in basename:
+                    continue
+                if '.jsonl' == basename[-6:] and '.deleted' not in basename and '.lock' not in basename:
+                    sid = basename.replace('.jsonl', '')
+                elif '.jsonl.reset.' in basename and '.deleted' not in basename:
+                    sid = basename.split('.jsonl.reset.')[0]
+                elif '.jsonl.bak-' in basename and '.deleted' not in basename:
+                    sid = basename.split('.jsonl.bak-')[0]
+                elif '.jsonl.deleted.' in basename:
+                    sid = basename.split('.jsonl.deleted.')[0]
+                else:
+                    continue
+                seen_sids.add(sid)
+                yield fp, 'jsonl'
+        for session_dir in SESSION_DIRS:
+            if not os.path.isdir(session_dir):
+                continue
+            for fp in sorted(glob.glob(os.path.join(session_dir, '*.trajectory.jsonl'))):
+                if '.deleted' in os.path.basename(fp):
+                    continue
+                sid = os.path.basename(fp).replace('.trajectory.jsonl', '')
+                if sid in seen_sids:
+                    continue
+                yield fp, 'trajectory'
+            for fp in sorted(glob.glob(os.path.join(session_dir, '*.trajectory.jsonl.deleted.*'))):
+                basename = os.path.basename(fp)
+                sid = basename.replace('.trajectory.jsonl', '').split('.deleted.')[0]
+                if sid in seen_sids:
+                    continue
+                yield fp, 'trajectory'
+
+    def _scan_trajectory_stats(self, fp, daily, system_ctx, ctx_limit):
+        """Aggregate one .trajectory.jsonl into the daily token counters.
+
+        Trajectory events carry no tool calls / thinking levels, so only token
+        estimates from prompt.submitted + model.completed contribute (same
+        estimation formulas as the jsonl scan / extract_session_meta)."""
+        running_chars = 0  # per-session context window estimate
+        with open(fp, encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                t = o.get('type', '')
+                ts = o.get('ts', '')
+                day = ts[:10] if ts else ''
+                if not day:
+                    continue
+                data = o.get('data', {}) or {}
+                if t == 'prompt.submitted':
+                    prompt = data.get('prompt', '') or ''
+                    # same auto-task filter as extract_meta / extract_session_meta
+                    if '[Subagent Context]' in prompt or '[cron:' in prompt or 'Write a dream diary' in prompt:
+                        continue
+                    daily[day] = daily.get(day, 0) + max(1, int(len(prompt) / 2))
+                    running_chars += len(prompt)
+                elif t == 'model.completed':
+                    usage = data.get('usage', {}) or {}
+                    tok = (usage.get('totalTokens', usage.get('total', 0)) or 0) if isinstance(usage, dict) else 0
+                    at = data.get('assistantTexts', []) or []
+                    out_text = '\n'.join(at) if isinstance(at, list) else (str(at) if at else '')
+                    if not tok:
+                        out_tokens = max(1, int(len(out_text) / 1.5)) if out_text else 10
+                        ctx_tokens = min(int(running_chars / 3) + system_ctx, ctx_limit)
+                        tok = ctx_tokens + out_tokens
+                    if tok:
+                        daily[day] = daily.get(day, 0) + tok
+                    running_chars += len(out_text)
+
+    def _collect_daily_stats(self):
+        """Scan session files: per-day tokens, thinking levels, tool usage, skill usage.
+        Cached 120s at class level (per-request handler instances make instance
+        caching useless); covers the same file set as the conversation list,
+        including trajectory-only sessions (mostly Feishu)."""
+        now = time.time()
+        if now - GalleryHandler._stats_scan_ts < 120 and GalleryHandler._stats_scan_cache is not None:
+            return GalleryHandler._stats_scan_cache
+        with STATS_SCAN_LOCK:
+            now = time.time()
+            if now - GalleryHandler._stats_scan_ts < 120 and GalleryHandler._stats_scan_cache is not None:
+                return GalleryHandler._stats_scan_cache
+            daily = {}          # date -> tokens (reported + estimated fallback)
+            thinking = {}       # level -> count
+            tools = {}          # tool name -> count
+            skills = {}         # skill name -> count (from SKILL.md access)
+            SYSTEM_CTX = 40000  # same estimate as extract_session_meta
+            CTX_LIMIT = 150000
+            for fp, kind in self._iter_stats_files():
+                try:
+                    if kind == 'trajectory':
+                        self._scan_trajectory_stats(fp, daily, SYSTEM_CTX, CTX_LIMIT)
+                        continue
+                    running_chars = 0  # per-session context window estimate
+                    with open(fp, encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                o = json.loads(line)
+                            except:
+                                continue
+                            t = o.get('type', '')
+                            if t == 'thinking_level_change':
+                                lv = o.get('thinkingLevel', '?')
+                                thinking[lv] = thinking.get(lv, 0) + 1
+                            elif t == 'compaction':
+                                summary = o.get('summary', '')
+                                running_chars = len(summary) if summary else 0
+                                continue
+                            elif t == 'message':
+                                m = o.get('message', {})
+                                role = m.get('role', '')
+                                ts = o.get('timestamp', '')
+                                day = ts[:10] if ts else ''
+                                if not day:
+                                    continue
+                                content = m.get('content', [])
+                                # Skip auto-task user messages (cron/subagent/dreaming)
+                                # — same filter as extract_session_meta, keeps the
+                                # heatmap consistent with the conversation list.
+                                if role == 'user':
+                                    utext = content if isinstance(content, str) else ''
+                                    if isinstance(content, list):
+                                        utext = '\n'.join(c.get('text', '') for c in content
+                                                          if isinstance(c, dict) and c.get('type') == 'text')
+                                    if '[Subagent Context]' in utext or '[cron:' in utext or 'Write a dream diary' in utext:
+                                        continue
+                                # tool calls + skill usage
+                                est_text_parts = []
+                                est_tool_chars = 0
+                                if role == 'assistant' and isinstance(content, list):
+                                    for c in content:
+                                        if isinstance(c, dict) and c.get('type') == 'toolCall':
+                                            nm = c.get('name', '?')
+                                            tools[nm] = tools.get(nm, 0) + 1
+                                            args = c.get('arguments', c.get('input', ''))
+                                            if isinstance(args, str):
+                                                sargs = args
+                                            else:
+                                                sargs = json.dumps(args, ensure_ascii=False)
+                                            est_tool_chars += len(sargs)
+                                            if 'SKILL.md' in sargs:
+                                                sm = re.search(r'([\w-]+)/SKILL\.md', sargs)
+                                                if sm:
+                                                    sk = sm.group(1)
+                                                    skills[sk] = skills.get(sk, 0) + 1
+                                        elif isinstance(c, dict) and c.get('type') == 'text':
+                                            est_text_parts.append(c.get('text', ''))
+                                        elif isinstance(c, dict) and c.get('type') == 'thinking':
+                                            est_text_parts.append(c.get('thinking', c.get('text', '')))
+                                # tokens: reported usage, fallback = same estimate as extract_session_meta
+                                usage = m.get('usage', {})
+                                tok = 0
+                                if isinstance(usage, dict):
+                                    tok = usage.get('totalTokens', usage.get('total', 0)) or 0
+                                if not tok and role == 'user':
+                                    tok = max(1, int(len(utext) / 2))
+                                elif not tok and role == 'assistant':
+                                    est_out = len(''.join(est_text_parts)) + est_tool_chars
+                                    out_tokens = max(1, int(est_out / 1.5)) if est_out > 0 else 10
+                                    ctx_tokens = min(int(running_chars / 3) + SYSTEM_CTX, CTX_LIMIT)
+                                    tok = ctx_tokens + out_tokens
+                                if tok:
+                                    daily[day] = daily.get(day, 0) + tok
+                                # update running chars for next assistant estimate
+                                if role == 'assistant':
+                                    for tpart in est_text_parts:
+                                        running_chars += len(tpart)
+                                elif role == 'user':
+                                    if isinstance(content, str):
+                                        running_chars += len(content)
+                                    elif isinstance(content, list):
+                                        running_chars += sum(len(c.get('text', '')) for c in content if isinstance(c, dict) and c.get('type') == 'text')
+                except Exception:
+                    pass
+            result = {'daily': daily, 'thinking': thinking, 'tools': tools, 'skills': skills}
+            GalleryHandler._stats_scan_cache = result
+            GalleryHandler._stats_scan_ts = now
+            return result
+
+    def _streak_days(self, dates):
+        """dates: list of 'YYYY-MM-DD'. Returns (current_streak, longest_streak)."""
+        days = sorted(set(dates))
+        if not days:
+            return (0, 0)
+        try:
+            day_objs = sorted({datetime.strptime(d, '%Y-%m-%d').date() for d in days})
+        except Exception:
+            return (0, 0)
+        # longest streak
+        longest = 1
+        run = 1
+        for i in range(1, len(day_objs)):
+            if (day_objs[i] - day_objs[i-1]).days == 1:
+                run += 1
+                longest = max(longest, run)
+            else:
+                run = 1
+        # current streak: count backwards from latest day
+        current = 1
+        today = datetime.now(BEIJING_TZ).date()
+        latest = day_objs[-1]
+        # walk backwards from latest
+        idx = len(day_objs) - 1
+        cur = 1
+        while idx > 0 and (day_objs[idx] - day_objs[idx-1]).days == 1:
+            cur += 1
+            idx -= 1
+        # if latest is not today and gap>1, streak from today is 0
+        if (today - latest).days > 1:
+            current = 0
+        else:
+            current = cur
+        return (current, longest)
+
+    def _longest_chat_segment(self, gap_threshold=1800):
+        """Longest continuous chat segment across all sessions.
+        Split each session's message timeline at gaps > threshold (default 30min),
+        return the longest segment duration in seconds. Cached 120s at class level;
+        covers trajectory-only sessions too. Timestamps are normalized to aware
+        datetimes so a naive/aware mix can never crash the stats endpoint."""
+        now = time.time()
+        if now - GalleryHandler._segment_scan_ts < 120 and GalleryHandler._segment_scan_cache is not None:
+            return GalleryHandler._segment_scan_cache
+        with STATS_SCAN_LOCK:
+            now = time.time()
+            if now - GalleryHandler._segment_scan_ts < 120 and GalleryHandler._segment_scan_cache is not None:
+                return GalleryHandler._segment_scan_cache
+            max_seg = 0
+            for fp, kind in self._iter_stats_files():
+                times = []
+                try:
+                    with open(fp, encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                o = json.loads(line)
+                            except:
+                                continue
+                            if kind == 'trajectory':
+                                if o.get('type') in ('prompt.submitted', 'model.completed'):
+                                    ts = o.get('ts', '')
+                                    if ts:
+                                        times.append(ts)
+                            elif o.get('type') == 'message':
+                                ts = o.get('timestamp', '')
+                                if ts:
+                                    times.append(ts)
+                except Exception:
+                    continue
+                if len(times) < 2:
+                    continue
+                dts = []
+                for t in times:
+                    try:
+                        dt = datetime.fromisoformat(t.replace('Z', '+00:00'))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=BEIJING_TZ)  # naive -> treat as Beijing local
+                        dts.append(dt)
+                    except Exception:
+                        pass
+                if len(dts) < 2:
+                    continue
+                seg_start = dts[0]
+                for i in range(1, len(dts)):
+                    gap = (dts[i] - dts[i-1]).total_seconds()
+                    if gap > gap_threshold:
+                        seg_len = (dts[i-1] - seg_start).total_seconds()
+                        if seg_len > max_seg:
+                            max_seg = seg_len
+                        seg_start = dts[i]
+                seg_len = (dts[-1] - seg_start).total_seconds()
+                if seg_len > max_seg:
+                    max_seg = seg_len
+            GalleryHandler._segment_scan_cache = max_seg
+            GalleryHandler._segment_scan_ts = now
+            return max_seg
+
     def serve_stats(self):
         total = len(cache.sessions)
         total_msgs = sum(s.get('userMessageCount', 0) + s.get('assistantMessageCount', 0) for s in cache.sessions)
@@ -1308,23 +1678,32 @@ class GalleryHandler(BaseHTTPRequestHandler):
         estimated_tokens = sum(s.get('estimatedTokens', 0) for s in cache.sessions)
         total_chars = sum(s.get('totalChars', 0) for s in cache.sessions)
 
-        # Try real GLM data from arkcli
+        # Try real GLM data from arkcli. Re-read the cache file when its mtime
+        # changed since the last fetch, so cron / manual refresh of
+        # .arkcli_glm_cache.json shows up without a server restart.
         glm_source = 'estimated'
         real_glm = None
-        if cache.arkcli_glm_total is not None:
-            real_glm = cache.arkcli_glm_total
-            glm_source = 'arkcli'
-        else:
-            # Try to fetch now (background, use cache result)
-            real_glm = cache._fetch_arkcli_glm_total()
+        cache_file = os.path.join(BASE_DIR, '.arkcli_glm_cache.json')
+        if os.path.exists(cache_file):
+            cache_mtime = os.path.getmtime(cache_file)
+            if cache.arkcli_glm_total is None or cache_mtime > cache.arkcli_glm_fetch_time:
+                cache.arkcli_glm_total = None  # force re-fetch from file
+                real_glm = cache._fetch_arkcli_glm_total()
+            else:
+                real_glm = cache.arkcli_glm_total
             if real_glm:
                 glm_source = 'arkcli'
 
+        # 统一核算：非 GLM 模型（DeepSeek/Kimi/Qwen...）的会话文件 usage 可靠（99%+），
+        # 直接用文件值（reported + estimated）；GLM 模型文件 usage 历史不可靠（~7%），
+        # 以火山平台真实总量（arkcli）为准。这样历史缺口被平台补齐，未来文件里的
+        # GLM usage 也不会与平台重复计入（GLM 桶不进 total）。
+        file_glm = sum(s.get('tokensGlm', 0) for s in cache.sessions)
+        file_non_glm = sum(s.get('tokensNonGlm', 0) for s in cache.sessions)
         if glm_source == 'arkcli' and real_glm:
-            # reported = deepseek/has-usage sessions; real_glm = GLM sessions from arkcli
-            total_tokens = reported_tokens + real_glm
+            total_tokens = file_non_glm + real_glm
         else:
-            total_tokens = sum(s.get('totalTokensDisplay', s.get('totalTokens', 0)) for s in cache.sessions)
+            total_tokens = file_glm + file_non_glm
         types = {}
         for s in cache.sessions:
             t = s.get('sessionType', 'unknown')
@@ -1352,18 +1731,84 @@ class GalleryHandler(BaseHTTPRequestHandler):
         dates = [s.get('startTime', '') for s in cache.sessions if s.get('startTime')]
         earliest = min(dates) if dates else ''
         latest = max(dates) if dates else ''
+        # Codex-style metrics
+        peak_tokens = max((s.get('totalTokensDisplay', s.get('totalTokens', 0)) for s in cache.sessions), default=0)
+        # Longest continuous chat segment: split session messages by >30min gaps
+        max_duration_sec = self._longest_chat_segment()
+        # streaks from session start dates
+        sess_dates = [s.get('startTime', '')[:10] for s in cache.sessions if s.get('startTime')]
+        current_streak, longest_streak = self._streak_days(sess_dates)
+        # daily stats: heatmap + thinking levels + tool usage + skill usage
+        ds = self._collect_daily_stats()
+        daily_tokens = dict(ds['daily'])
+        thinking_levels = ds['thinking']
+        tool_usage = ds['tools']
+        skill_usage = ds.get('skills', {})
+        # Align heatmap total with the top metric: if arkcli GLM real total is used,
+        # scale days so sum(dailyTokens) == total_tokens (same accounting).
+        # Two-way scaling (up or down) keeps the heatmap consistent with the top
+        # metric as file GLM usage grows after the supportsUsageInStreaming fix.
+        if glm_source == 'arkcli' and real_glm and daily_tokens:
+            heat_sum = sum(daily_tokens.values())
+            if heat_sum > 0 and abs(total_tokens - heat_sum) / heat_sum > 0.005:
+                # distribute the difference across days proportionally to their share
+                # (heavier days get more of the GLM real total)
+                factor = total_tokens / heat_sum
+                daily_tokens = {d: int(v * factor) for d, v in daily_tokens.items()}
+        top_tools = sorted(tool_usage.items(), key=lambda x: -x[1])[:5]
+        total_tool_calls = sum(tool_usage.values())
+        distinct_tools = len(tool_usage)
+        # 插件 = 非核心工具（feishu_*/lark_*/qwen-mm*/mcp-server*/image_generate 等）
+        CORE_TOOLS = {'exec', 'edit', 'process', 'read', 'write', 'apply_patch', 'image', 'sessions_list',
+                      'sessions_history', 'sessions_spawn', 'sessions_yield', 'memory_search', 'memory_get',
+                      'subagents', 'web_search', 'web_fetch', 'update_plan', 'cron', 'session_status', 'feishu_oauth'}
+        plugin_usage = {k: v for k, v in tool_usage.items()
+                        if k not in CORE_TOOLS and ('.' not in k or '__' in k)}
+        top_plugins = sorted(plugin_usage.items(), key=lambda x: -x[1])[:5]
+        # Skill 使用统计（SKILL.md 访问）+ 排序 Top5
+        top_skills = sorted(skill_usage.items(), key=lambda x: -x[1])[:5]
+        total_skill_uses = sum(skill_usage.values())
+        distinct_skills = len(skill_usage)
+        # format duration like Codex: 1小时 39分
+        def fmt_duration(sec):
+            sec = int(sec)
+            if sec <= 0:
+                return '0分'
+            h, m = divmod(sec // 60, 60)
+            d, h = divmod(h, 24)
+            if d > 0:
+                return f'{d}天 {h}小时'
+            if h > 0:
+                return f'{h}小时 {m}分'
+            return f'{m}分'
         self.send_json({
             'totalConversations': total,
             'totalMessages': total_msgs,
             'totalTokens': total_tokens,
             'estimatedTokens': estimated_tokens,
             'glmSource': glm_source,
+            'glmSourceDate': getattr(cache, 'arkcli_glm_fetch_date', ''),
             'reportedTokens': reported_tokens,
             'totalChars': total_chars,
             'typeBreakdown': types,
             'modelBreakdown': models,
             'earliestDate': earliest[:10] if earliest else '',
             'latestDate': latest[:10] if latest else '',
+            # Codex-style additions
+            'peakTokens': peak_tokens,
+            'maxDurationSec': max_duration_sec,
+            'maxDurationText': fmt_duration(max_duration_sec),
+            'currentStreak': current_streak,
+            'longestStreak': longest_streak,
+            'dailyTokens': daily_tokens,
+            'thinkingLevels': thinking_levels,
+            'topTools': top_tools,
+            'totalToolCalls': total_tool_calls,
+            'distinctTools': distinct_tools,
+            'topPlugins': top_plugins,
+            'topSkills': top_skills,
+            'totalSkillUses': total_skill_uses,
+            'distinctSkills': distinct_skills,
         })
 
     def serve_file_json(self, filepath):
@@ -1372,6 +1817,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
                 data = f.read()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')  # 数据接口永不用浏览器缓存
             self.send_header('Content-Length', len(data.encode('utf-8')))
             self.end_headers()
             self.wfile.write(data.encode('utf-8'))
@@ -1419,6 +1865,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Cache-Control', 'no-store')  # 数据接口永不用浏览器缓存（防陈旧面板）
         self.send_header('Content-Length', len(body))
         self.end_headers()
         self.wfile.write(body)

@@ -207,6 +207,8 @@ def extract_meta(filepath, session_key, get_session_type_func=None):
     user_msg_count = 0
     assistant_msg_count = 0
     total_tokens = 0
+    tokens_glm = 0        # reported tokens from GLM models (platform data wins in stats)
+    tokens_non_glm = 0    # reported tokens from non-GLM models
     total_chars = 0
     full_text_parts = []
     session_type = None
@@ -262,7 +264,12 @@ def extract_meta(filepath, session_key, get_session_type_func=None):
                     # Extract tokens from usage (sum all calls = actual total consumption)
                     usage = data.get('usage', {})
                     if isinstance(usage, dict):
-                        total_tokens += usage.get('totalTokens', usage.get('total', 0)) or 0
+                        u = usage.get('totalTokens', usage.get('total', 0)) or 0
+                        total_tokens += u
+                        if 'glm' in str(obj.get('modelId', '')).lower():
+                            tokens_glm += u
+                        else:
+                            tokens_non_glm += u
     except:
         pass
 
@@ -299,6 +306,8 @@ def extract_meta(filepath, session_key, get_session_type_func=None):
         'sessionType': session_type,
         'sessionKey': session_key,
         'totalTokens': total_tokens,
+        'tokensGlm': tokens_glm,
+        'tokensNonGlm': tokens_non_glm,
         'totalChars': total_chars,
         'fullText': '\n'.join(full_text_parts).lower(),
     }

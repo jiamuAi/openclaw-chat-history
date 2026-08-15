@@ -85,7 +85,19 @@
 }
 [data-theme="light"] .session-item.active .session-item-title { color: var(--accent-deep); }
 [data-theme="light"] .stats-panel-content { background: #ffffff; }
-[data-theme="light"] .stats-card .num { background: linear-gradient(135deg, #8b7cf6, #5a3fd6); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+[data-theme="light"] .stats-card .num { color: #2b2b34; }
+[data-theme="light"] .stats-bar-track { background: rgba(20,20,40,0.07); }
+[data-theme="light"] .stats-close:hover { background: rgba(20,20,40,0.05); }
+[data-theme="light"] .stats-metrics { background: #fff; border-color: #e8e8ee; }
+[data-theme="light"] .stats-metric + .stats-metric { border-left-color: #e8e8ee; }
+[data-theme="light"] .stats-avatar { background: #f2efe9; }
+[data-theme="light"] .hm-cell.l0 { background: #ebedf0; }
+[data-theme="light"] .hm-cell.l1 { background: #d6e4f5; }
+[data-theme="light"] .hm-cell.l2 { background: #a8c8ea; }
+[data-theme="light"] .hm-cell.l3 { background: #7aacdf; }
+[data-theme="light"] .hm-cell.l4 { background: #4c8fd4; }
+[data-theme="light"] .hm-cell.l5 { background: #1f72c9; }
+[data-theme="light"] .hm-cell.l6 { background: #0a55b8; }
 [data-theme="light"] .msg-row.user .msg-avatar { background: linear-gradient(135deg, #ececf3, #dcdce6); }
 [data-theme="light"] .chat-empty .empty-glow { background: radial-gradient(circle, rgba(124,108,240,0.14), transparent 65%); }
 [data-theme="light"] .msg-content blockquote { background: rgba(124,108,240,0.05); }
@@ -253,23 +265,72 @@ body {
 /* Source icon in meta */
 .source-icon { font-size: 13px; opacity: 0.9; }
 
-/* Stats panel */
-.stats-panel { position: fixed; inset: 0; background: rgba(8,8,12,0.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 100; display: none; align-items: center; justify-content: center; }
+/* ===== Stats panel — Codex 个人用量页风格 (v1.15.0) ===== */
+.stats-panel { position: fixed; inset: 0; background: rgba(20,20,30,0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 100; display: none; align-items: center; justify-content: center; padding: 24px; }
 .stats-panel.show { display: flex; }
-.stats-panel-content { background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: 20px; padding: 28px 32px 24px; max-width: 480px; width: 90%; box-shadow: var(--shadow-3); max-height: 85vh; overflow-y: auto; }
-.stats-panel-content h2 { font-size: 17px; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; color: var(--text); }
-.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
-.stats-card { padding: 16px; border-radius: 14px; background: var(--bg-inset); border: 1px solid var(--border); }
-.stats-card .num { font-size: 26px; font-weight: 700; background: linear-gradient(135deg, #c4b5fd, var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-.stats-card .label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
-.stats-breakdown { display: flex; flex-direction: column; gap: 8px; }
-.stats-bar-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
-.stats-bar-label { width: 80px; color: var(--text-dim); }
-.stats-bar-track { flex: 1; height: 8px; background: var(--bg-inset); border-radius: 4px; overflow: hidden; }
-.stats-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
-.stats-bar-val { width: 32px; text-align: right; font-weight: 600; }
-.stats-close { width: 100%; padding: 11px; border: none; border-radius: 12px; background: linear-gradient(135deg, var(--accent-deep), var(--accent)); color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; margin-top: 24px; transition: all 0.18s var(--ease); }
-.stats-close:hover { transform: translateY(-1px); box-shadow: 0 6px 20px var(--accent-glow); }
+.stats-panel-content { background: var(--bg-app); border: 1px solid var(--border-strong); border-radius: 24px; max-width: 1000px; width: 100%; box-shadow: var(--shadow-3); max-height: 96vh; overflow-y: auto; padding: 36px 44px 28px; }
+
+/* 顶部用户区 */
+.stats-user { display: flex; flex-direction: column; align-items: center; margin-bottom: 28px; }
+.stats-avatar { width: 84px; height: 84px; border-radius: 50%; background: #2a2a36; display: flex; align-items: center; justify-content: center; font-size: 38px; border: 1px solid var(--border); }
+.stats-user-name { font-size: 26px; font-weight: 650; color: var(--text); margin-top: 14px; letter-spacing: 0.01em; }
+.stats-user-sub { font-size: 13.5px; color: var(--text-faint); margin-top: 5px; }
+.stats-user-tag { display: inline-block; margin-left: 6px; padding: 1px 9px; border-radius: 8px; background: var(--bg-inset); border: 1px solid var(--border); font-size: 12px; color: var(--text-dim); }
+
+/* 5 指标栏 */
+.stats-metrics { display: flex; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; margin-bottom: 32px; background: var(--bg-elevated); }
+.stats-metric { flex: 1; padding: 20px 10px 16px; text-align: center; min-width: 0; }
+.stats-metric + .stats-metric { border-left: 1px solid var(--border); }
+.stats-metric .m-num { font-size: 24px; font-weight: 650; color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; white-space: nowrap; }
+.stats-metric .m-num .unit { font-size: 13px; font-weight: 500; color: var(--text-faint); margin-left: 2px; }
+.stats-metric .m-label { font-size: 12.5px; color: var(--text-dim); margin-top: 7px; }
+
+/* 热力图区 */
+.stats-heatmap { margin-bottom: 32px; }
+.hm-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.hm-title { font-size: 17px; font-weight: 700; color: var(--text); }
+.hm-tabs { display: flex; gap: 2px; background: var(--bg-inset); border-radius: 9px; padding: 2px; }
+.hm-tab { font-size: 12.5px; color: var(--text-faint); cursor: pointer; padding: 4px 12px; border-radius: 7px; transition: all 0.15s var(--ease); border: none; background: transparent; }
+.hm-tab.active { color: var(--text); background: var(--bg-elevated-2); font-weight: 600; }
+.hm-wrap { overflow-x: auto; padding-bottom: 4px; }
+.hm-months { display: grid; grid-auto-flow: column; grid-auto-columns: 14px; gap: 3px; font-size: 10.5px; color: var(--text-faint); margin-bottom: 4px; height: 15px; }
+.hm-months span { overflow: visible; white-space: nowrap; text-align: left; line-height: 15px; }
+.hm-grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 14px); grid-auto-columns: 14px; gap: 3px; width: fit-content; }
+.hm-cell { width: 14px; height: 14px; border-radius: 3px; background: var(--bg-inset); }
+.hm-cell.l1 { background: #1e3a52; }
+.hm-cell.l2 { background: #1a4a6e; }
+.hm-cell.l3 { background: #155a8a; }
+.hm-cell.l4 { background: #116aa6; }
+.hm-cell.l5 { background: #0d7ac2; }
+.hm-cell.l6 { background: #0a8ade; }
+.hm-cell:hover { outline: 2px solid var(--text-dim); outline-offset: 1px; }
+.hm-tip { position: fixed; background: var(--bg-elevated-2); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--text); pointer-events: none; z-index: 200; box-shadow: var(--shadow-2); display: none; white-space: nowrap; }
+.hm-legend { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin-top: 8px; font-size: 11px; color: var(--text-faint); }
+.hm-legend .hm-cell { width: 11px; height: 11px; }
+/* 每周视图柱状 */
+.hm-bars { display: flex; align-items: flex-end; gap: 2px; height: 96px; padding-top: 4px; }
+.hm-bar { flex: 1; min-width: 2px; border-radius: 1.5px 1.5px 0 0; background: #1465c4; opacity: 0.85; }
+.hm-bar:hover { opacity: 1; }
+.hm-bar.zero { background: var(--border); opacity: 0.35; }
+/* 累计折线 */
+.hm-svg { width: 100%; height: 120px; display: block; }
+
+/* 底部两栏 */
+.stats-bottom { display: flex; gap: 40px; margin-bottom: 20px; }
+.stats-col { flex: 1; min-width: 0; }
+.stats-col-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 14px; }
+.insight-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.insight-row:last-child { border-bottom: none; }
+.insight-row .k { color: var(--text-dim); }
+.insight-row .v { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.plugin-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.plugin-row:last-child { border-bottom: none; }
+.plugin-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #fff; flex-shrink: 0; }
+.plugin-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-count { color: var(--text-faint); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
+.stats-close { width: 100%; padding: 10px; border: 1px solid var(--border-strong); border-radius: 10px; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 13px; font-weight: 500; margin-top: 6px; transition: all 0.18s var(--ease); }
+.stats-close:hover { background: var(--bg-inset); color: var(--text); }
 
 .chat-messages { max-width: 780px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 30px; }
 
@@ -496,7 +557,7 @@ body {
 <div class="app">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
-      <h1>💬 会话历史 <span class="version-tag">v1.13.0</span> <button class="stats-btn" onclick="showStats()" title="数据统计">📊</button><button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="切换深浅主题">☀️</button></h1>
+      <h1>💬 会话历史 <span class="version-tag">v1.15.2</span> <button class="stats-btn" onclick="showStats()" title="数据统计">📊</button><button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="切换深浅主题">☀️</button></h1>
       <div class="sidebar-search">
         <span class="search-icon">🔍</span>
         <input type="text" id="search-input" placeholder="搜索会话..." />
@@ -529,11 +590,38 @@ body {
 
 <div class="stats-panel" id="stats-panel" onclick="if(event.target===this)closeStats()">
   <div class="stats-panel-content">
-    <h2>📊 数据统计</h2>
-    <div id="stats-body">加载中...</div>
+    <div class="stats-user">
+      <div class="stats-avatar">🧑‍💻</div>
+      <div class="stats-user-name" id="stats-user-name">jiamu<span class="stats-user-tag">Plus</span></div>
+      <div class="stats-user-sub" id="stats-user-sub">@jiamu_duke · OpenClaw 会话统计</div>
+    </div>
+    <div class="stats-metrics" id="stats-metrics">加载中...</div>
+    <div class="stats-heatmap">
+      <div class="hm-header">
+        <div class="hm-title">Token 活动</div>
+        <div class="hm-tabs" id="hm-tabs">
+          <button class="hm-tab active" data-mode="daily" onclick="renderHeatmap('daily')">每日</button>
+          <button class="hm-tab" data-mode="weekly" onclick="renderHeatmap('weekly')">每周</button>
+          <button class="hm-tab" data-mode="cumulative" onclick="renderHeatmap('cumulative')">累计</button>
+        </div>
+      </div>
+      <div class="hm-wrap" id="hm-wrap"></div>
+      <div class="hm-legend" id="hm-legend"></div>
+    </div>
+    <div class="stats-bottom">
+      <div class="stats-col">
+        <div class="stats-col-title">活动洞察</div>
+        <div id="stats-insight">加载中...</div>
+      </div>
+      <div class="stats-col">
+        <div class="stats-col-title">最常用的插件</div>
+        <div id="stats-plugins">加载中...</div>
+      </div>
+    </div>
     <button class="stats-close" onclick="closeStats()">关闭</button>
   </div>
 </div>
+<div class="hm-tip" id="hm-tip"></div>
 
 <div class="toast" id="toast"></div>
 
@@ -1471,39 +1559,317 @@ async function togglePin(id) {
   } catch(e) { showToast('操作失败', true); }
 }
 
+let _statsData = null;
+let _hmMode = 'daily';
+let _cumPts = null;  // 累计折线数据点（SVG hover 定位用）
+
 async function showStats() {
   document.getElementById('stats-panel').classList.add('show');
-  const body = document.getElementById('stats-body');
-  body.innerHTML = '<div style="text-align:center;padding:20px;">加载中...</div>';
   try {
     const res = await fetch('/api/stats');
-    const s = await res.json();
-    const colors = ['#8b7cf6','#34d399','#fbbf24','#f87171','#60a5fa','#f472b6','#a78bfa','#2dd4bf'];
-    const typeLabels = { webchat: 'WebChat', feishu: '飞书', cron: '定时任务', subagent: '子Agent', dreaming: '做梦' };
-    let typeBars = Object.entries(s.typeBreakdown).sort((a,b) => b[1]-a[1]).map(([k,v],i) => {
-      const pct = (v / s.totalConversations * 100).toFixed(0);
-      return `<div class="stats-bar-row"><span class="stats-bar-label">${typeLabels[k]||k}</span><div class="stats-bar-track"><div class="stats-bar-fill" style="width:${pct}%;background:${colors[i%colors.length]}"></div></div><span class="stats-bar-val">${v}</span></div>`;
-    }).join('');
-    let modelBars = Object.entries(s.modelBreakdown).sort((a,b) => b[1]-a[1]).map(([k,v],i) => {
-      const pct = (v / s.totalConversations * 100).toFixed(0);
-      return `<div class="stats-bar-row"><span class="stats-bar-label">${k}</span><div class="stats-bar-track"><div class="stats-bar-fill" style="width:${pct}%;background:${colors[i%colors.length]}"></div></div><span class="stats-bar-val">${v}</span></div>`;
-    }).join('');
-    body.innerHTML = `
-      <div class="stats-grid">
-        <div class="stats-card"><div class="num">${s.totalConversations}</div><div class="label">总会话数</div></div>
-        <div class="stats-card"><div class="num">${s.totalMessages}</div><div class="label">总消息数</div></div>
-        <div class="stats-card"><div class="num">${(s.totalChars / 10000).toFixed(1)}<span style="font-size:14px;font-weight:400">万</span></div><div class="label">总字数</div></div>
-        <div class="stats-card"><div class="num">${(s.totalTokens / 100000000).toFixed(2)}<span style="font-size:14px;font-weight:400">亿</span></div><div class="label">总 Token ${s.glmSource === 'arkcli' ? '📡' : '≈'}</div></div>
-      </div>
-      ${s.earliestDate ? `<div style="font-size:12px;color:var(--text-dim);margin-bottom:16px;text-align:center;">时间范围：${escapeHtml(s.earliestDate)} ~ ${escapeHtml(s.latestDate)}</div>` : ''}
-      <div style="font-size:13px;font-weight:600;margin-bottom:8px;">渠道分布</div>
-      <div class="stats-breakdown" style="margin-bottom:16px;">${typeBars}</div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:8px;">模型分布</div>
-      <div class="stats-breakdown">${modelBars}</div>
+    _statsData = await res.json();
+    const s = _statsData;
+    const fmt = n => n.toLocaleString('en-US');
+    const yi = n => (n / 100000000).toFixed(2);
+    // 用户区
+    document.getElementById('stats-user-name').innerHTML = '老板<span class="stats-user-tag">OpenClaw</span>';
+    const fetchedAt = new Date();
+    const hm = String(fetchedAt.getHours()).padStart(2, '0');
+    const mm = String(fetchedAt.getMinutes()).padStart(2, '0');
+    document.getElementById('stats-user-sub').textContent = `佳小木 · ${s.earliestDate} → ${s.latestDate} · 更新于 ${hm}:${mm}`;
+    // 5 指标栏
+    const tokLabel = s.glmSource === 'arkcli' && s.glmSourceDate
+      ? `累计 Token 数（截至 ${s.glmSourceDate.slice(5).replace('-', '/')}）`
+      : '累计 Token 数';
+    document.getElementById('stats-metrics').innerHTML = `
+      <div class="stats-metric"><div class="m-num">${yi(s.totalTokens)}<span class="unit">亿</span></div><div class="m-label">${tokLabel}</div></div>
+      <div class="stats-metric"><div class="m-num">${yi(s.peakTokens)}<span class="unit">亿</span></div><div class="m-label">峰值 Token 数</div></div>
+      <div class="stats-metric"><div class="m-num">${s.maxDurationText}</div><div class="m-label">最长聊天时长</div></div>
+      <div class="stats-metric"><div class="m-num">${s.currentStreak}<span class="unit">天</span></div><div class="m-label">当前连续天数</div></div>
+      <div class="stats-metric"><div class="m-num">${s.longestStreak}<span class="unit">天</span></div><div class="m-label">最长连续天数</div></div>
     `;
-  } catch(e) { body.innerHTML = `<p>加载失败: ${e.message}</p>`; }
+    // 活动洞察
+    const tl = s.thinkingLevels || {};
+    const tlTotal = Object.values(tl).reduce((a, b) => a + b, 0);
+    const tlTop = Object.entries(tl).sort((a, b) => b[1] - a[1])[0];
+    const tlName = { high: '高', medium: '中', low: '低', off: '关闭' };
+    const tlPct = tlTop && tlTotal ? Math.round(tlTop[1] / tlTotal * 100) : 0;
+    const insightRows = [
+      ['最常用推理强度', tlTop ? `${tlName[tlTop[0]] || tlTop[0]} · ${tlPct}%` : '—'],
+      ['使用过 Skill', `${s.distinctSkills || 0} 个 · ${fmt(s.totalSkillUses || 0)} 次`],
+      ['已探索工具', `${s.distinctTools} 种`],
+      ['工具调用总数', `${fmt(s.totalToolCalls)} 次`],
+      ['聊天总数', `${fmt(s.totalConversations)}`],
+      ['总消息数', `${fmt(s.totalMessages)}`],
+    ];
+    document.getElementById('stats-insight').innerHTML = insightRows.map(([k, v]) =>
+      `<div class="insight-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('');
+    // Top 插件
+    const toolIcons = { exec: '⚡', edit: '✏️', process: '🔁', read: '📖', write: '📝', image: '🖼️', sessions_list: '📋', memory_search: '🧠', web_search: '🌐', web_fetch: '🕸️', subagents: '👥', sessions_spawn: '🚀', sessions_yield: '⏸️', update_plan: '🗺️', memory_get: '📂', cron: '⏰', feishu_im_user_message: '💬', image_generate: '🎨', feishu_update_doc: '📄', feishu_create_doc: '🆕', feishu_fetch_doc: '📖', feishu_drive_file: '🗂️', feishu_bitable_app_table_record: '📊', qwen_mm_plugins_core__transcribe_audio: '🎙️', qwen_mm_plugins_core__save_view: '📸', qwen_mm_plugins_video_edit__qwen_tts: '🗣️', qwen_mm_plugins_core__vision_chat: '👁️', qwen_mm_plugins_core__web_search: '🔍', mcp_server_askecho_search_infi__web_search: '🔎' };
+    const toolColors = ['#8b7cf6','#f59e0b','#10b981','#3b82f6','#ef4444','#ec4899','#14b8a6','#6366f1'];
+    const hashIdx = n => { let h = 0; for (const c of n) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % toolColors.length; };
+    // 最常用插件 = Skill（SKILL.md 访问）+ 插件工具，合并排序取 Top5
+    const skillList = (s.topSkills || []).map(([n, c]) => [n, c, 'skill']);
+    const pluginList = (s.topPlugins || []).map(([n, c]) => [n, c, 'plugin']);
+    const merged = [...skillList, ...pluginList].sort((a, b) => b[1] - a[1]).slice(0, 5);
+    document.getElementById('stats-plugins').innerHTML = merged.length ? merged.map(([name, cnt, kind]) => {
+      const short = name.includes('__') ? name.split('__').pop() : name;
+      // name/short 来自会话文件（工具名/技能名），插入 innerHTML 前必须转义
+      const safeName = escapeHtml(name);
+      const safeShort = escapeHtml(short);
+      return `
+      <div class="plugin-row">
+        <div class="plugin-icon" style="background:${toolColors[hashIdx(name)]}">${kind === 'skill' ? '🧩' : (toolIcons[name] || toolIcons[short] || '🔌')}</div>
+        <span class="plugin-name" title="${kind === 'skill' ? 'Skill: ' : ''}${safeName}">$${safeShort}</span>
+        <span class="plugin-count">${fmt(cnt)} 次运行</span>
+      </div>`;
+    }).join('') : '<div style="color:var(--text-faint);font-size:13px">暂无数据</div>';
+    // 热力图（记住上次选择的视图）
+    renderHeatmap(_hmMode || 'daily');
+  } catch(e) {
+    const err = `<p style="color:var(--red);padding:10px">加载失败: ${e.message}</p>`;
+    document.getElementById('stats-metrics').innerHTML = err;
+    document.getElementById('stats-insight').innerHTML = err;
+    document.getElementById('stats-plugins').innerHTML = err;
+    document.getElementById('hm-wrap').innerHTML = '';
+  }
 }
-function closeStats() { document.getElementById('stats-panel').classList.remove('show'); }
+function closeStats() { document.getElementById('stats-panel').classList.remove('show'); document.getElementById('hm-tip').style.display = 'none'; }
+
+/* ===== 热力图：每日/每周/累计 ===== */
+function renderHeatmap(mode) {
+  _hmMode = mode;
+  document.querySelectorAll('.hm-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+  if (!_statsData) return;
+  const daily = _statsData.dailyTokens || {};
+  const wrap = document.getElementById('hm-wrap');
+  const legend = document.getElementById('hm-legend');
+  const today = new Date();
+  // 时间轴：最近 12 个月（53 周通栏，复刻 Codex：前大半年空白、数据集中右侧）
+  const start = new Date(today.getFullYear(), today.getMonth() - 11, 1);
+  start.setDate(start.getDate() - start.getDay()); // 对齐到周日
+  const dayList = [];
+  for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+    dayList.push(new Date(d));
+  }
+  const keyOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const valOf = d => daily[keyOf(d)] || 0;
+  const fmtTok = n => n >= 100000000 ? (n / 100000000).toFixed(2) + '亿' : n >= 10000 ? (n / 10000).toFixed(1) + '万' : String(n);
+  // tooltip
+  const tip = document.getElementById('hm-tip');
+  const showTip = (e, d) => {
+    const v = valOf(d);
+    tip.textContent = `${d.getMonth() + 1}月${d.getDate()}日 使用了 ${fmtTok(v)} Token`;
+    tip.style.display = 'block';
+    const r = tip.getBoundingClientRect();
+    let x = e.clientX + 14, y = e.clientY + 14;
+    if (x + r.width > window.innerWidth) x = e.clientX - r.width - 10;
+    if (y + r.height > window.innerHeight) y = e.clientY - r.height - 10;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  };
+  const hideTip = () => { tip.style.display = 'none'; };
+  // 分级阈值按数据分位数动态计算（GitHub 贡献图风格），
+  // 固定阈值在 GLM 缩放放大数值后会让高分位全部顶格、失去区分度
+  const hmLevels = (() => {
+    const vals = Object.values(daily).filter(v => v > 0).sort((a, b) => a - b);
+    const lv = [];
+    if (vals.length) {
+      for (let i = 1; i <= 6; i++) {
+        const idx = Math.min(vals.length - 1, Math.round((vals.length - 1) * i / 6));
+        lv.push(vals[idx]);
+      }
+    }
+    return lv;
+  })();
+  const levelOf = v => {
+    if (v <= 0) return 0;
+    let l = 0;
+    for (let i = 0; i < 6; i++) if (v >= hmLevels[i]) l = i + 1;
+    return l;
+  };
+
+  if (mode === 'weekly') {
+    // 按自然周聚合柱状（复用与每日视图相同的窗口/列结构）
+    const firstDow = start.getDay(); // 0=周日
+    const pad = firstDow;
+    const cellCount = dayList.length + pad;
+    const weeks = Math.ceil(cellCount / 7);
+    const cellArr = [];
+    for (let i = 0; i < weeks * 7; i++) {
+      const dayIdx = i - pad;
+      cellArr.push(dayIdx >= 0 && dayIdx < dayList.length ? dayList[dayIdx] : null);
+    }
+    // 每周聚合
+    const weekSums = [];
+    for (let w = 0; w < weeks; w++) {
+      let sum = 0;
+      for (let r = 0; r < 7; r++) {
+        const d = cellArr[w * 7 + r];
+        if (d) sum += valOf(d);
+      }
+      weekSums.push(sum);
+    }
+    const maxW = Math.max(...weekSums, 1);
+    // 月份标签（与每日同构）
+    const wMonthSpans = [];
+    let wLastM = -1;
+    for (let w = 0; w < weeks; w++) {
+      const d = cellArr[w * 7 + pad] || null;
+      const m = d ? d.getMonth() : -1;
+      wMonthSpans.push((d && m !== wLastM) ? `${m + 1}月` : '');
+      if (d && m !== wLastM) wLastM = m;
+    }
+    const wMonthsHtml = wMonthSpans.map(t => `<span>${t}</span>`).join('');
+    const barsHtml = weekSums.map((sum, i) => {
+      const h = sum > 0 ? Math.max(4, Math.round(sum / maxW * 96)) : 2;
+      const d0 = cellArr[i * 7 + pad] || cellArr[i * 7] || dayList[0];
+      return `<div class="hm-bar${sum > 0 ? '' : ' zero'}" style="height:${h}px" onmouseenter="showHmTip(event,'${keyOf(d0)}','w')" onmouseleave="hideHmTip()"></div>`;
+    }).join('');
+    wrap.innerHTML = `
+      <div class="hm-months">${wMonthsHtml}</div>
+      <div class="hm-bars">${barsHtml}</div>`;
+    legend.innerHTML = `<span>${dayList.length} 天 · ${weeks} 周 · 峰值周 ${(maxW / 100000000).toFixed(2)}亿</span>`;
+    return;
+  }
+  if (mode === 'cumulative') {
+    // 累计折线 SVG：带月份刻度 + Y 轴网格 + 数值标注
+    let acc = 0;
+    const pts = dayList.map(d => { acc += valOf(d); return [d, acc]; });
+    const W = 940, H = 140, P = { l: 52, r: 10, t: 8, b: 22 };
+    const maxV = Math.max(...pts.map(p => p[1]), 1);
+    const px = i => P.l + i / (pts.length - 1 || 1) * (W - P.l - P.r);
+    const py = v => H - P.b - v / maxV * (H - P.t - P.b);
+    const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
+    const area = line + ` L${px(pts.length - 1)},${H - P.b} L${px(0)},${H - P.b} Z`;
+    // Y 轴刻度（0/25/50/75/100%）
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => ({
+      v: maxV * f,
+      y: py(maxV * f),
+      label: f === 0 ? '0' : f === 1 ? fmtTok(maxV) : ''
+    }));
+    const fmtShort = v => v >= 100000000 ? (v / 100000000).toFixed(1) + '亿' : v >= 10000 ? (v / 10000).toFixed(0) + '万' : String(v);
+    const yGrid = yTicks.map(t =>
+      `<line x1="${P.l}" y1="${t.y}" x2="${W - P.r}" y2="${t.y}" stroke="var(--border)" stroke-width="1"/>
+       <text x="${P.l - 8}" y="${t.y + 4}" text-anchor="end" font-size="10" fill="var(--text-faint)">${fmtShort(t.v)}</text>`).join('');
+    // X 轴月份刻度
+    const xTicks = [];
+    let lastM = -1;
+    for (let i = 0; i < pts.length; i++) {
+      const m = pts[i][0].getMonth();
+      if (m !== lastM) { xTicks.push({ i, m }); lastM = m; }
+    }
+    const xLabels = xTicks.map(t =>
+      `<text x="${px(t.i)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${t.m + 1}月</text>`).join('');
+    // 保存数据点供 mousemove 按 x 坐标定位最近日期
+    _cumPts = pts.map(p => ({ day: keyOf(p[0]), acc: p[1], x: px(pts.indexOf(p)) }));
+    wrap.innerHTML = `<svg class="hm-svg" id="hmCumSvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:140px" onmousemove="showCumTip(event)" onmouseleave="hideHmTip()">
+      <defs><linearGradient id="hmArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1465c4" stop-opacity="0.35"/><stop offset="100%" stop-color="#1465c4" stop-opacity="0.02"/></linearGradient></defs>
+      ${yGrid}
+      <path d="${area}" fill="url(#hmArea)"/>
+      <path d="${line}" fill="none" stroke="#1465c4" stroke-width="1.8"/>
+      ${xLabels}
+    </svg>`;
+    legend.innerHTML = `<span>累计 ${fmtTok(acc)} · ${dayList.length} 天</span>`;
+    return;
+  }
+  // 每日：GitHub 贡献图
+  const firstDow = start.getDay(); // 0=周日
+  const cells = [];
+  const pad = firstDow;
+  const cellCount = dayList.length + pad;
+  const weeks = Math.ceil(cellCount / 7);
+  const cellArr = [];
+  for (let i = 0; i < weeks * 7; i++) {
+    const dayIdx = i - pad;
+    cellArr.push(dayIdx >= 0 && dayIdx < dayList.length ? dayList[dayIdx] : null);
+  }
+  // 月份标签（与网格同构：每列一个 span，月份起始列显示文字）
+  const monthSpans = [];
+  let lastM = -1;
+  for (let w = 0; w < weeks; w++) {
+    const d = cellArr[w * 7 + pad] || null;
+    const m = d ? d.getMonth() : -1;
+    monthSpans.push((d && m !== lastM) ? `${m + 1}月` : '');
+    if (d && m !== lastM) lastM = m;
+  }
+  const monthsHtml = monthSpans.map(t => `<span>${t}</span>`).join('');
+  let cellsHtml = '';
+  cellArr.forEach((d, i) => {
+    if (!d) { cellsHtml += '<div class="hm-cell"></div>'; return; }
+    const v = valOf(d);
+    const lv = levelOf(v);
+    cellsHtml += `<div class="hm-cell l${lv}" onmouseenter="showHmTip(event,'${keyOf(d)}','d')" onmouseleave="hideHmTip()"></div>`;
+  });
+  wrap.innerHTML = `
+    <div class="hm-months">${monthsHtml}</div>
+    <div class="hm-grid">${cellsHtml}</div>`;
+  legend.innerHTML = `
+    <span>少</span>
+    <div class="hm-cell l0"></div><div class="hm-cell l1"></div><div class="hm-cell l2"></div><div class="hm-cell l3"></div><div class="hm-cell l4"></div><div class="hm-cell l5"></div><div class="hm-cell l6"></div>
+    <span>多</span>`;
+}
+
+function showHmTip(e, dayKey, kind) {
+  const tip = document.getElementById('hm-tip');
+  const d = new Date(dayKey + 'T00:00:00+08:00');
+  const daily = _statsData.dailyTokens || {};
+  let v = daily[dayKey] || 0;
+  if (kind === 'w') {
+    // week sum
+    let sum = 0;
+    for (let i = 0; i < 7; i++) {
+      const dd = new Date(d); dd.setDate(dd.getDate() + i);
+      const k = `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}-${String(dd.getDate()).padStart(2, '0')}`;
+      sum += daily[k] || 0;
+    }
+    v = sum;
+  } else if (kind === 'c') {
+    // cumulative up to this day
+    let acc = 0;
+    for (const [k, val] of Object.entries(daily)) {
+      if (k <= dayKey) acc += val;
+    }
+    v = acc;
+  }
+  const fmtTok = n => n >= 100000000 ? (n / 100000000).toFixed(2) + '亿' : n >= 10000 ? (n / 10000).toFixed(1) + '万' : String(n);
+  tip.textContent = kind === 'c'
+    ? `截至${d.getMonth() + 1}月${d.getDate()}日 累计 ${fmtTok(v)} Token`
+    : kind === 'w'
+      ? `${d.getMonth() + 1}月${d.getDate()}日 当周使用了 ${fmtTok(v)} Token`
+      : `${d.getMonth() + 1}月${d.getDate()}日 使用了 ${fmtTok(v)} Token`;
+  tip.style.display = 'block';
+  const r = tip.getBoundingClientRect();
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + r.width > window.innerWidth) x = e.clientX - r.width - 10;
+  if (y + r.height > window.innerHeight) y = e.clientY - r.height - 10;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+function hideHmTip() { document.getElementById('hm-tip').style.display = 'none'; }
+
+// 累计折线 hover：按鼠标 x 坐标定位最近日期，显示截至该日累计值
+function showCumTip(e) {
+  const svg = document.getElementById('hmCumSvg');
+  if (!svg || !_cumPts || !_cumPts.length) return;
+  const r = svg.getBoundingClientRect();
+  const viewX = (e.clientX - r.left) / r.width * 940; // 换算回 viewBox 坐标（W=940）
+  // 找最近数据点
+  let best = 0, bestDist = Infinity;
+  for (let i = 0; i < _cumPts.length; i++) {
+    const dist = Math.abs(_cumPts[i].x - viewX);
+    if (dist < bestDist) { bestDist = dist; best = i; }
+  }
+  const p = _cumPts[best];
+  const d = new Date(p.day + 'T00:00:00+08:00');
+  const fmtTok = n => n >= 100000000 ? (n / 100000000).toFixed(2) + '亿' : n >= 10000 ? (n / 10000).toFixed(1) + '万' : String(n);
+  const tip = document.getElementById('hm-tip');
+  tip.textContent = `截至${d.getMonth() + 1}月${d.getDate()}日 累计 ${fmtTok(p.acc)} Token`;
+  tip.style.display = 'block';
+  const tr = tip.getBoundingClientRect();
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + tr.width > window.innerWidth) x = e.clientX - tr.width - 10;
+  if (y + tr.height > window.innerHeight) y = e.clientY - tr.height - 10;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
 
 function showToast(msg, isError) {
   const t = document.getElementById('toast');
