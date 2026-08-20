@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>💬 会话历史</title>
-<!-- Session Gallery v1.13.0 | 2026-08-07 开源化：个人配置外置 config.local.json，显示名动态读取 -->
+<title>💬 历史会话</title>
+<!-- OpenClaw Chat History v1.15.3 | 2026-08-20 开源化：个人配置外置 config.local.json，显示名动态读取 -->
 <style>
 :root {
   /* ===== 设计令牌 · 深空紫（v1.11 设计焕新） ===== */
@@ -345,8 +345,18 @@ body {
 .msg-row.user .msg-avatar { background: linear-gradient(135deg, #3c3c4e, #2a2a38); }
 
 .msg-bubble { max-width: 78%; min-width: 0; }
-.msg-sender { font-size: 12px; font-weight: 600; margin-bottom: 5px; color: var(--text-faint); letter-spacing: 0.3px; }
-.msg-row.user .msg-sender { text-align: right; }
+.msg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.msg-row.user .msg-head { flex-direction: row-reverse; }
+.msg-sender { font-size: 12px; font-weight: 600; color: var(--text-faint); letter-spacing: 0.3px; }
+.msg-copy {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 9px; border: 1px solid var(--border); border-radius: 6px;
+  background: transparent; color: var(--text-faint); font-size: 11px;
+  cursor: pointer; line-height: 1.5; user-select: none;
+  opacity: 0.8; transition: opacity 0.15s var(--ease), background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.msg-copy:hover { opacity: 1; background: var(--bg-inset); color: var(--text); border-color: var(--border-strong); }
+.msg-copy.copied { opacity: 1; color: #22c55e; border-color: rgba(34,197,94,0.45); background: rgba(34,197,94,0.08); }
 
 .msg-content { padding: 13px 17px; border-radius: 14px; font-size: 14px; line-height: 1.8; word-break: break-word; }
 .msg-row.assistant .msg-content { background: var(--bg-elevated); border: 1px solid var(--border); border-top-left-radius: 4px; box-shadow: var(--shadow-1); }
@@ -557,7 +567,7 @@ body {
 <div class="app">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
-      <h1>💬 会话历史 <span class="version-tag">v1.15.2</span> <button class="stats-btn" onclick="showStats()" title="数据统计">📊</button><button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="切换深浅主题">☀️</button></h1>
+      <h1>💬 历史会话 <span class="version-tag">v1.15.3</span> <button class="stats-btn" onclick="showStats()" title="数据统计">📊</button><button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="切换深浅主题">☀️</button></h1>
       <div class="sidebar-search">
         <span class="search-icon">🔍</span>
         <input type="text" id="search-input" placeholder="搜索会话..." />
@@ -942,6 +952,14 @@ function renderSidebar() {
 function loadMore() { sidebarLimit += 50; renderSidebar(); }
 
 async function confirmDelete(id, title) {
+  const isSpecificFileOnly = id.includes('__reset_') || id.includes('__bak_') || id.includes('__deleted_') || id.includes('__traj_del_');
+  let removeIds = [id];
+  const sid = id.split('__')[0];
+  if (!isSpecificFileOnly) {
+    const related = allSessions.filter(s => s.sessionId === sid && s.id !== id).map(s => s.id);
+    removeIds = [...removeIds, ...related];
+  }
+  const removeSet = new Set(removeIds);
   // Use native confirm for reliable blocking dialog
   const ok = confirm(`⚠️ 确认删除这条会话记录？\n\n"${title}"\n\n这个操作会真实删除 OpenClaw 里的历史记录文件，不可恢复！`);
   if (!ok) return;
@@ -951,12 +969,15 @@ async function confirmDelete(id, title) {
     const data = await res.json();
     if (data.ok) {
       // Remove from local data
-      allSessions = allSessions.filter(s => s.id !== id);
-      filteredSessions = filteredSessions.filter(s => s.id !== id);
+      allSessions = allSessions.filter(s => !removeSet.has(s.id));
+      filteredSessions = filteredSessions.filter(s => !removeSet.has(s.id));
       // Remove title
-      delete titles[id];
+      removeIds.forEach(rid => delete titles[rid]);
+      if (!isSpecificFileOnly) {
+        delete titles[sid];
+      }
       // If currently viewing this session, clear chat area
-      if (currentConvId === id) {
+      if (currentConvId && removeSet.has(currentConvId)) {
         currentConvId = null;
         document.getElementById('chat-area').innerHTML = `
           <div class="chat-empty">
@@ -1181,13 +1202,14 @@ function runContentSearch(q) {
   // Clear old marks
   body.querySelectorAll('mark.current').forEach(m => {
     m.classList.remove('current');
-    m.tagName = 'MARK'; // ensure it stays as mark
   });
   // Remove old marks added by this function
   body.querySelectorAll('mark[data-cs]').forEach(m => {
     const parent = m.parentNode;
-    parent.replaceChild(document.createTextNode(m.textContent), m);
-    parent.normalize();
+    if (parent) {
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    }
   });
   contentMarks = [];
   currentMarkIdx = -1;
@@ -1421,6 +1443,37 @@ function toggleGroup(id) {
   if (el) el.classList.toggle('expanded');
 }
 
+function copyMsgText(btn) {
+  const text = btn.getAttribute('data-copy') || '';
+  if (!text) return;
+  if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+  const done = () => {
+    btn.classList.add('copied');
+    btn.textContent = '✓ 已复制';
+    clearTimeout(btn._copyT);
+    btn._copyT = setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.textContent = btn.dataset.label;
+    }, 1500);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopyText(text, done));
+  } else {
+    fallbackCopyText(text, done);
+  }
+}
+
+function fallbackCopyText(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { /* ignore */ }
+  document.body.removeChild(ta);
+}
+
 function renderMessage(msg) {
   const isUser = msg.role === 'user';
   const avatar = isUser ? '👤' : '🌳';
@@ -1471,11 +1524,18 @@ function renderMessage(msg) {
     `;
   }
 
+  const copyBtn = (msg.text && msg.text.trim())
+    ? `<button class="msg-copy" data-copy="${escapeHtml(msg.text)}" onclick="copyMsgText(this)" title="复制消息内容">⧉ 复制</button>`
+    : '';
+
   return `
     <div class="msg-row ${msg.role}">
       <div class="msg-avatar">${avatar}</div>
       <div class="msg-bubble">
-        <div class="msg-sender">${sender}</div>
+        <div class="msg-head">
+          <div class="msg-sender">${sender}</div>
+          ${copyBtn}
+        </div>
         ${contentHtml}
         ${toolsHtml}
         ${thinkingHtml}
@@ -1620,7 +1680,7 @@ async function showStats() {
       return `
       <div class="plugin-row">
         <div class="plugin-icon" style="background:${toolColors[hashIdx(name)]}">${kind === 'skill' ? '🧩' : (toolIcons[name] || toolIcons[short] || '🔌')}</div>
-        <span class="plugin-name" title="${kind === 'skill' ? 'Skill: ' : ''}${safeName}">$${safeShort}</span>
+        <span class="plugin-name" title="${kind === 'skill' ? 'Skill: ' : ''}${safeName}">${safeShort}</span>
         <span class="plugin-count">${fmt(cnt)} 次运行</span>
       </div>`;
     }).join('') : '<div style="color:var(--text-faint);font-size:13px">暂无数据</div>';

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""HTTP server for OpenClaw session gallery with in-memory full-text search."""
+"""HTTP server for OpenClaw Chat History with in-memory full-text search."""
 
 # ============================================================
-# 版本: 1.15.2
-# 更新: 2026-08-15
+# 版本: 1.15.3
+# 更新: 2026-08-20
 # 说明: 统一用量核算——会话文件按模型拆分 GLM/非GLM 桶，
 #       非 GLM 用文件真实 usage，GLM 以火山平台真实总量为准
 #       （消除文件 GLM usage 与平台数据的重复计入；配套
 #       OpenClaw 全模型开启 supportsUsageInStreaming）
 # ============================================================
-VERSION = '1.15.2'
+VERSION = '1.15.3'
 
 import json
 import os
@@ -32,6 +32,8 @@ TITLES_LOCK = Lock()
 PINNED_LOCK = Lock()
 # Serializes read-modify-write of OpenClaw's sessions.json (label / pinnedAt sync)
 SESSIONS_LOCK = Lock()
+# Serializes in-memory cache state updates and concurrent reads of it.
+CACHE_LOCK = Lock()
 # Serializes the full-disk stats scans so concurrent /api/stats requests
 # don't duplicate the same ~1-2s scan (result is cached anyway)
 STATS_SCAN_LOCK = Lock()
@@ -427,6 +429,7 @@ class ConversationCache:
         self.file_map = {}       # id -> filepath
         self.loaded = False
         self.known_files = set() # track loaded file paths for incremental updates
+        self.file_mtimes = {}    # track last known file mtimes
         self.active_session_ids = set()  # sessionIds active within idle window
         self.arkcli_glm_total = None     # real GLM token total from arkcli (None = not fetched)
         self.arkcli_glm_fetch_time = 0   # timestamp of last successful fetch
@@ -435,11 +438,11 @@ class ConversationCache:
         self.session_pins = {}      # sid -> pinnedAt (OpenClaw 置顶标记，sessions.json)
         self.registry_sids = set()  # sids present in sessions.json (用于区分"未置顶"与"未登记")
         self.pinned_set = set()     # uids -> 收敛后的置顶状态
-        self.titles_map = {}        # uid/sid -> gallery title (titles.json)
+        self.titles_map = {}        # uid/sid -> history title (titles.json)
         self._titles_dirty = set()  # uids whose titles.json entry needs write-back
 
     def _load_titles_map(self):
-        """Read gallery titles.json into uid/sid -> title map."""
+        """Read history titles.json into uid/sid -> title map."""
         self.titles_map = {}
         titles = read_json_file(os.path.join(BASE_DIR, 'titles.json'), {})
         if isinstance(titles, dict):
@@ -451,10 +454,10 @@ class ConversationCache:
         """Resolve OpenClaw label with single-source-of-truth convergence.
 
         One logical title list, OpenClaw is authoritative:
-        - Gallery rename / AI title writes BOTH titles.json and sessions.json
+        - OpenClaw Chat History rename / AI title writes BOTH titles.json and sessions.json
           label (see update_title / auto_generate_title), so they normally agree.
         - If OpenClaw's label exists and differs from titles.json, OpenClaw was
-          changed later (gallery changes are dual-written) -> use label and fold
+          changed later (history changes are dual-written) -> use label and fold
           it back into titles.json so both sides converge to one value.
         - If titles.json has a value but OpenClaw has no label (old archived
           sessions OpenClaw no longer tracks), keep the titles.json value.
@@ -499,7 +502,7 @@ class ConversationCache:
         """Read sessions.json: extract sessionIds updated within 48h + OpenClaw labels.
 
         OpenClaw keeps a per-session `label` in sessions.json (cron task names,
-        subagent task names, or titles renamed in the OpenClaw UI). The gallery
+        subagent task names, or titles renamed in the OpenClaw UI). The history
         previously never read it, so OpenClaw-side titles were not synced here.
         Match ONLY by sessionId: multiple historical sessions (e.g. Feishu
         direct chat after a reset) share the same sessionKey, so key-based
@@ -519,7 +522,7 @@ class ConversationCache:
                     # Match OpenClaw's deriveSessionTitle order (label first):
                     # the dashboard shows label when present, and only falls
                     # back to displayName/subject when label is empty.
-                    # (2026-08-05: gallery briefly preferred displayName which
+                    # (2026-08-05: history briefly preferred displayName which
                     # made it show the auto title while OpenClaw showed the
                     # label — flipped back to label-first.)
                     label = (v.get('label') or '').strip()
@@ -667,70 +670,71 @@ class ConversationCache:
     def load(self):
         """Load all real conversations into memory."""
         print("[Cache] Loading conversations into memory...")
-        self._refresh_active_ids()
-        all_files = self._scan_all_files()
-        self.sessions = []
-        self.full_text = {}
-        self.file_map = {}
-        self.known_files = set()
-        self.file_mtimes = {}
+        with CACHE_LOCK:
+            self._refresh_active_ids()
+            all_files = self._scan_all_files()
+            self.sessions = []
+            self.full_text = {}
+            self.file_map = {}
+            self.known_files = set()
+            self.file_mtimes = {}
 
-        for filepath, uid, sid, sk, agent, source in all_files:
-            if source == 'trajectory':
-                meta = trajectory_parser.extract_meta(filepath, sk, get_session_type)
-            else:
-                meta = extract_session_meta(filepath, sk)
-            stype = meta['sessionType']
-            if meta['userMessageCount'] == 0:
-                continue
+            for filepath, uid, sid, sk, agent, source in all_files:
+                if source == 'trajectory':
+                    meta = trajectory_parser.extract_meta(filepath, sk, get_session_type)
+                else:
+                    meta = extract_session_meta(filepath, sk)
+                stype = meta['sessionType']
+                if meta['userMessageCount'] == 0:
+                    continue
 
-            session_data = {
-                'id': uid,
-                'sessionId': sid,
-                'agent': agent,
-                'source': source,
-                'startTime': meta['startTime'],
-                'endTime': meta['endTime'],
-                'startTimeDisplay': meta['startTimeDisplay'],
-                'endTimeDisplay': meta['endTimeDisplay'],
-                'firstUserMessage': meta['firstUserMessage'],
-                'title': meta['title'],
-                'openclawLabel': self._converge_label(uid, sid),
-                'model': meta['model'],
-                'messageCount': meta['messageCount'],
-                'userMessageCount': meta['userMessageCount'],
-                'assistantMessageCount': meta['assistantMessageCount'],
-                'sessionType': meta['sessionType'],
-                'sessionKey': meta['sessionKey'],
-                'isReset': '__reset_' in uid or '__bak_' in uid,
-                'isActive': sid in self.active_session_ids,
-                'totalTokens': meta.get('totalTokens', 0),
-                'estimatedTokens': meta.get('estimatedTokens', 0),
-                'tokensGlm': meta.get('tokensGlm', 0),
-                'tokensNonGlm': meta.get('tokensNonGlm', 0),
-                'totalTokensDisplay': meta.get('totalTokensDisplay', meta.get('totalTokens', 0)),
-                'totalChars': meta.get('totalChars', 0),
-            }
-            self.sessions.append(session_data)
-            self.full_text[uid] = meta['fullText']
-            self.file_map[uid] = filepath
-            self.known_files.add(filepath)
-            try:
-                self.file_mtimes[filepath] = os.path.getmtime(filepath)
-            except: pass
-        self.sessions.sort(key=lambda x: x.get('startTime', '') or '', reverse=True)
-        self.loaded = True
-        self._flush_titles()
-        self._converge_pins()
-        print(f"[Cache] Loaded {len(self.sessions)} conversations, "
-              f"{sum(len(v) for v in self.full_text.values()) / 1024:.1f} KB text in memory")
+                session_data = {
+                    'id': uid,
+                    'sessionId': sid,
+                    'agent': agent,
+                    'source': source,
+                    'startTime': meta['startTime'],
+                    'endTime': meta['endTime'],
+                    'startTimeDisplay': meta['startTimeDisplay'],
+                    'endTimeDisplay': meta['endTimeDisplay'],
+                    'firstUserMessage': meta['firstUserMessage'],
+                    'title': meta['title'],
+                    'openclawLabel': self._converge_label(uid, sid),
+                    'model': meta['model'],
+                    'messageCount': meta['messageCount'],
+                    'userMessageCount': meta['userMessageCount'],
+                    'assistantMessageCount': meta['assistantMessageCount'],
+                    'sessionType': meta['sessionType'],
+                    'sessionKey': meta['sessionKey'],
+                    'isReset': '__reset_' in uid or '__bak_' in uid,
+                    'isActive': sid in self.active_session_ids,
+                    'totalTokens': meta.get('totalTokens', 0),
+                    'estimatedTokens': meta.get('estimatedTokens', 0),
+                    'tokensGlm': meta.get('tokensGlm', 0),
+                    'tokensNonGlm': meta.get('tokensNonGlm', 0),
+                    'totalTokensDisplay': meta.get('totalTokensDisplay', meta.get('totalTokens', 0)),
+                    'totalChars': meta.get('totalChars', 0),
+                }
+                self.sessions.append(session_data)
+                self.full_text[uid] = meta['fullText']
+                self.file_map[uid] = filepath
+                self.known_files.add(filepath)
+                try:
+                    self.file_mtimes[filepath] = os.path.getmtime(filepath)
+                except: pass
+            self.sessions.sort(key=lambda x: x.get('startTime', '') or '', reverse=True)
+            self.loaded = True
+            self._flush_titles()
+            self._converge_pins()
+            print(f"[Cache] Loaded {len(self.sessions)} conversations, "
+                  f"{sum(len(v) for v in self.full_text.values()) / 1024:.1f} KB text in memory")
 
     def _reapply_labels(self):
         """Re-resolve openclawLabel for every cached session.
 
         Called on every refresh: sessions.json labels can change without any
         session-file mtime change (e.g. renamed in the OpenClaw UI), and
-        refresh_new() skips unchanged files. Re-applying keeps the gallery
+        refresh_new() skips unchanged files. Re-applying keeps the history
         in sync with the single source of truth.
         """
         for s in self.sessions:
@@ -741,13 +745,13 @@ class ConversationCache:
         """Converge pin state with OpenClaw (single source of truth).
 
         OpenClaw marks a pinned session with `pinnedAt` in sessions.json.
-        Gallery pin/unpin dual-writes pinnedAt (see toggle_pin), so both
+        OpenClaw Chat History pin/unpin dual-writes pinnedAt (see toggle_pin), so both
         sides normally agree; differences mean OpenClaw changed later:
         - Entry has pinnedAt but pinned.json lacks the uid -> pinned in
           OpenClaw, fold into pinned.json.
         - Entry exists WITHOUT pinnedAt but pinned.json has the uid ->
           unpinned in OpenClaw, remove from pinned.json.
-        - Sessions with no registry entry (old/archived) keep gallery state.
+        - Sessions with no registry entry (old/archived) keep history state.
         Also stamps each session dict with a 'pinned' flag for the frontend.
         """
         pinned_path = os.path.join(BASE_DIR, 'pinned.json')
@@ -779,112 +783,113 @@ class ConversationCache:
 
     def refresh_new(self):
         """Check for new/changed session files and update cache."""
-        self._refresh_active_ids()
-        self._load_titles_map()
-        self._reapply_labels()
-        all_files = self._scan_all_files()
-        new_count = 0
-        updated_count = 0
-        for filepath, uid, sid, sk, agent, source in all_files:
-            current_mtime = None
-            if filepath in self.known_files:
-                # Known file: check mtime BEFORE any parsing. Unchanged files are
-                # skipped entirely so a refresh never re-reads the full dataset.
+        with CACHE_LOCK:
+            self._refresh_active_ids()
+            self._load_titles_map()
+            self._reapply_labels()
+            all_files = self._scan_all_files()
+            new_count = 0
+            updated_count = 0
+            for filepath, uid, sid, sk, agent, source in all_files:
+                current_mtime = None
+                if filepath in self.known_files:
+                    # Known file: check mtime BEFORE any parsing. Unchanged files are
+                    # skipped entirely so a refresh never re-reads the full dataset.
+                    try:
+                        current_mtime = os.path.getmtime(filepath)
+                    except:
+                        continue
+                    cached_mtime = self.file_mtimes.get(filepath, 0)
+                    if current_mtime <= cached_mtime:
+                        continue
+
+                # New or changed file: parse it
+                if source == 'trajectory':
+                    meta = trajectory_parser.extract_meta(filepath, sk, get_session_type)
+                else:
+                    meta = extract_session_meta(filepath, sk)
+                if meta['userMessageCount'] == 0:
+                    continue
+
+                if filepath in self.known_files:
+                    # File changed, update cache
+                    for i, s in enumerate(self.sessions):
+                        if s['id'] == uid:
+                            self.sessions[i] = {
+                                'id': uid, 'sessionId': sid, 'agent': agent,
+                                'source': source,
+                                'startTime': meta['startTime'],
+                                'endTime': meta['endTime'],
+                                'startTimeDisplay': meta['startTimeDisplay'],
+                                'endTimeDisplay': meta['endTimeDisplay'],
+                                'firstUserMessage': meta['firstUserMessage'],
+                                'title': meta['title'],
+                                'openclawLabel': self._converge_label(uid, sid),
+                                'model': meta['model'],
+                                'messageCount': meta['messageCount'],
+                                'userMessageCount': meta['userMessageCount'],
+                                'assistantMessageCount': meta['assistantMessageCount'],
+                                'sessionType': meta['sessionType'],
+                                'sessionKey': meta['sessionKey'],
+                                'isReset': '__reset_' in uid or '__bak_' in uid,
+                                'isActive': sid in self.active_session_ids,
+                                'totalTokens': meta.get('totalTokens', 0),
+                                'estimatedTokens': meta.get('estimatedTokens', 0),
+                                'tokensGlm': meta.get('tokensGlm', 0),
+                                'tokensNonGlm': meta.get('tokensNonGlm', 0),
+                                'totalTokensDisplay': meta.get('totalTokensDisplay', meta.get('totalTokens', 0)),
+                                'totalChars': meta.get('totalChars', 0),
+                            }
+                            self.full_text[uid] = meta['fullText']
+                            self.file_map[uid] = filepath
+                            self.known_files.add(filepath)
+                            self.file_mtimes[filepath] = current_mtime
+                            updated_count += 1
+                            break
+                    continue
+
+                # New file
+                session_data = {
+                    'id': uid,
+                    'sessionId': sid,
+                    'agent': agent,
+                    'source': source,
+                    'startTime': meta['startTime'],
+                    'endTime': meta['endTime'],
+                    'startTimeDisplay': meta['startTimeDisplay'],
+                    'endTimeDisplay': meta['endTimeDisplay'],
+                    'firstUserMessage': meta['firstUserMessage'],
+                    'title': meta['title'],
+                    'openclawLabel': self._converge_label(uid, sid),
+                    'model': meta['model'],
+                    'messageCount': meta['messageCount'],
+                    'userMessageCount': meta['userMessageCount'],
+                    'assistantMessageCount': meta['assistantMessageCount'],
+                    'sessionType': meta['sessionType'],
+                    'sessionKey': meta['sessionKey'],
+                    'isReset': '__reset_' in uid or '__bak_' in uid,
+                    'isActive': sid in self.active_session_ids,
+                    'totalTokens': meta.get('totalTokens', 0),
+                    'estimatedTokens': meta.get('estimatedTokens', 0),
+                    'tokensGlm': meta.get('tokensGlm', 0),
+                    'tokensNonGlm': meta.get('tokensNonGlm', 0),
+                    'totalTokensDisplay': meta.get('totalTokensDisplay', meta.get('totalTokens', 0)),
+                    'totalChars': meta.get('totalChars', 0),
+                }
+                self.sessions.append(session_data)
+                self.full_text[uid] = meta['fullText']
+                self.file_map[uid] = filepath
+                self.known_files.add(filepath)
                 try:
-                    current_mtime = os.path.getmtime(filepath)
-                except:
-                    continue
-                cached_mtime = getattr(self, 'file_mtimes', {}).get(filepath, 0)
-                if current_mtime <= cached_mtime:
-                    continue
+                    self.file_mtimes[filepath] = os.path.getmtime(filepath)
+                except: pass
+                new_count += 1
 
-            # New or changed file: parse it
-            if source == 'trajectory':
-                meta = trajectory_parser.extract_meta(filepath, sk, get_session_type)
-            else:
-                meta = extract_session_meta(filepath, sk)
-            if meta['userMessageCount'] == 0:
-                continue
-
-            if filepath in self.known_files:
-                # File changed, update cache
-                for i, s in enumerate(self.sessions):
-                    if s['id'] == uid:
-                        self.sessions[i] = {
-                            'id': uid, 'sessionId': sid, 'agent': agent,
-                            'source': source,
-                            'startTime': meta['startTime'],
-                            'endTime': meta['endTime'],
-                            'startTimeDisplay': meta['startTimeDisplay'],
-                            'endTimeDisplay': meta['endTimeDisplay'],
-                            'firstUserMessage': meta['firstUserMessage'],
-                            'title': meta['title'],
-                            'openclawLabel': self._converge_label(uid, sid),
-                            'model': meta['model'],
-                            'messageCount': meta['messageCount'],
-                            'userMessageCount': meta['userMessageCount'],
-                            'assistantMessageCount': meta['assistantMessageCount'],
-                            'sessionType': meta['sessionType'],
-                            'sessionKey': meta['sessionKey'],
-                            'isReset': '__reset_' in uid or '__bak_' in uid,
-                            'isActive': sid in self.active_session_ids,
-                            'totalTokens': meta.get('totalTokens', 0),
-                            'estimatedTokens': meta.get('estimatedTokens', 0),
-                            'totalTokensDisplay': meta.get('totalTokensDisplay', meta.get('totalTokens', 0)),
-                            'totalChars': meta.get('totalChars', 0),
-                        }
-                        self.full_text[uid] = meta['fullText']
-                        if not hasattr(self, 'file_mtimes'):
-                            self.file_mtimes = {}
-                        self.file_mtimes[filepath] = current_mtime
-                        updated_count += 1
-                        break
-                continue
-
-            # New file
-            session_data = {
-                'id': uid,
-                'sessionId': sid,
-                'agent': agent,
-                'source': source,
-                'startTime': meta['startTime'],
-                'endTime': meta['endTime'],
-                'startTimeDisplay': meta['startTimeDisplay'],
-                'endTimeDisplay': meta['endTimeDisplay'],
-                'firstUserMessage': meta['firstUserMessage'],
-                'title': meta['title'],
-                'openclawLabel': self._converge_label(uid, sid),
-                'model': meta['model'],
-                'messageCount': meta['messageCount'],
-                'userMessageCount': meta['userMessageCount'],
-                'assistantMessageCount': meta['assistantMessageCount'],
-                'sessionType': meta['sessionType'],
-                'sessionKey': meta['sessionKey'],
-                'isReset': '__reset_' in uid or '__bak_' in uid,
-                'isActive': sid in self.active_session_ids,
-                'totalTokens': meta.get('totalTokens', 0),
-                'estimatedTokens': meta.get('estimatedTokens', 0),
-                'tokensGlm': meta.get('tokensGlm', 0),
-                'tokensNonGlm': meta.get('tokensNonGlm', 0),
-                'totalTokensDisplay': meta.get('totalTokensDisplay', meta.get('totalTokens', 0)),
-                'totalChars': meta.get('totalChars', 0),
-            }
-            self.sessions.append(session_data)
-            self.full_text[uid] = meta['fullText']
-            self.file_map[uid] = filepath
-            self.known_files.add(filepath)
-            if not hasattr(self, 'file_mtimes'):
-                self.file_mtimes = {}
-            try:
-                self.file_mtimes[filepath] = os.path.getmtime(filepath)
-            except: pass
-            new_count += 1
-
-        if new_count > 0 or updated_count > 0:
-            self.sessions.sort(key=lambda x: x.get('startTime', '') or '', reverse=True)
-            print(f"[Cache] Added {new_count} new, updated {updated_count} changed conversations")
-        self._flush_titles()
-        self._converge_pins()
+            if new_count > 0 or updated_count > 0:
+                self.sessions.sort(key=lambda x: x.get('startTime', '') or '', reverse=True)
+                print(f"[Cache] Added {new_count} new, updated {updated_count} changed conversations")
+            self._flush_titles()
+            self._converge_pins()
 
     def search(self, query):
         """Full-text search across all conversations. Returns list of session ids that match."""
@@ -971,7 +976,7 @@ def generate_title_with_ai(messages_preview):
     return "未命名会话"
 
 
-class GalleryHandler(BaseHTTPRequestHandler):
+class HistoryHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -979,7 +984,9 @@ class GalleryHandler(BaseHTTPRequestHandler):
         if path == '/api/conversations':
             # Refresh cache for new files, then return all sessions
             cache.refresh_new()
-            self.send_json({'sessions': cache.sessions})
+            with CACHE_LOCK:
+                sessions = list(cache.sessions)
+            self.send_json({'sessions': sessions})
         elif path.startswith('/api/conversation/'):
             conv_id = unquote(path.replace('/api/conversation/', ''))
             self.serve_conversation_detail(conv_id)
@@ -1005,12 +1012,14 @@ class GalleryHandler(BaseHTTPRequestHandler):
             qs = parse_qs(parsed.query)
             q = qs.get('q', [''])[0]
             cache.refresh_new()
-            match_ids = cache.search(q)
+            with CACHE_LOCK:
+                match_ids = cache.search(q)
+                sessions = list(cache.sessions)
             if match_ids is None:
                 # Empty query = return all
-                self.send_json({'sessions': cache.sessions, 'total': len(cache.sessions)})
+                self.send_json({'sessions': sessions, 'total': len(sessions)})
             else:
-                matched = [s for s in cache.sessions if s['id'] in set(match_ids)]
+                matched = [s for s in sessions if s['id'] in set(match_ids)]
                 self.send_json({'sessions': matched, 'total': len(matched), 'query': q})
         elif path == '/api/config':
             # 前端显示配置（只暴露展示名，不暴露目录/模型等内部配置）
@@ -1066,12 +1075,17 @@ class GalleryHandler(BaseHTTPRequestHandler):
         # this session -> never overwrite it with an AI-generated one.
         # Refresh labels first: sessions.json may have changed after the last
         # cache refresh (e.g. renamed in the OpenClaw UI just now).
-        cache._refresh_active_ids()
-        if cache.session_labels.get(sid):
-            self.send_json({'title': cache.session_labels.get(sid), 'cached': True})
+        with CACHE_LOCK:
+            cache._refresh_active_ids()
+            cached_label = cache.session_labels.get(sid)
+        if cached_label:
+            self.send_json({'title': cached_label, 'cached': True})
             return
 
-        filepath = cache.file_map.get(conv_id) or find_filepath_by_id(conv_id)
+        with CACHE_LOCK:
+            filepath = cache.file_map.get(conv_id)
+        if not filepath:
+            filepath = find_filepath_by_id(conv_id)
         if not filepath:
             self.send_json({'error': 'Not found'}, 404)
             return
@@ -1126,7 +1140,10 @@ class GalleryHandler(BaseHTTPRequestHandler):
 
     def delete_conversation(self, conv_id):
         """Delete a conversation file from OpenClaw sessions."""
-        filepath = cache.file_map.get(conv_id) or find_filepath_by_id(conv_id)
+        with CACHE_LOCK:
+            filepath = cache.file_map.get(conv_id)
+        if not filepath:
+            filepath = find_filepath_by_id(conv_id)
         if not filepath:
             self.send_json({'error': '会话文件不存在'}, 404)
             return
@@ -1181,26 +1198,72 @@ class GalleryHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 errors.append(f'{os.path.basename(f)}: {e}')
 
-        # Remove from cache
-        cache.sessions = [s for s in cache.sessions if s['id'] != conv_id]
-        cache.full_text.pop(conv_id, None)
-        cache.file_map.pop(conv_id, None)
-        cache.known_files.discard(filepath)
+        # Remove from cache, including full sid-family when deleting live files.
+        with CACHE_LOCK:
+            if specific_file_only:
+                removed_ids = [conv_id]
+            else:
+                removed_ids = [s['id'] for s in cache.sessions if s.get('sessionId') == sid]
+                if not removed_ids:
+                    removed_ids = [conv_id]
+            removed_set = set(removed_ids)
+
+            cache.sessions = [s for s in cache.sessions if s['id'] not in removed_set]
+            cache.full_text = {
+                sid2: v for sid2, v in cache.full_text.items()
+                if sid2 not in removed_set
+            }
+            removed_file_set = set()
+            for rid in removed_set:
+                fp = cache.file_map.pop(rid, None)
+                if fp:
+                    removed_file_set.add(fp)
+                cache.titles_map.pop(rid, None)
+            for f in related_files:
+                removed_file_set.add(f)
+            cache.known_files = {f for f in cache.known_files if f not in removed_file_set}
+            cache.file_mtimes = {
+                f: mtime for f, mtime in cache.file_mtimes.items()
+                if f not in removed_file_set
+            }
+            if not specific_file_only:
+                cache.pinned_set.difference_update(removed_set)
+                cache.titles_map.pop(sid, None)
 
         # Remove title (thread-safe: same lock + atomic write as other titles.json access)
         titles_path = os.path.join(BASE_DIR, 'titles.json')
         with TITLES_LOCK:
             titles = read_json_file(titles_path, {})
-            if conv_id in titles:
-                del titles[conv_id]
+            updated = False
+            if specific_file_only:
+                if conv_id in titles:
+                    del titles[conv_id]
+                    updated = True
+            else:
+                for k in list(titles.keys()):
+                    if k == sid or k.startswith(f'{sid}__'):
+                        del titles[k]
+                        updated = True
+            if updated:
                 atomic_write_json(titles_path, titles)
 
         # Remove from pinned list (thread-safe)
         pinned_path = os.path.join(BASE_DIR, 'pinned.json')
         with PINNED_LOCK:
             pinned = read_json_file(pinned_path, [])
-            if isinstance(pinned, list) and conv_id in pinned:
-                pinned.remove(conv_id)
+            if not isinstance(pinned, list):
+                pinned = []
+            if specific_file_only:
+                old = pinned
+                pinned = [x for x in pinned if x != conv_id]
+                removed_any = pinned != old
+            else:
+                to_remove = set(removed_set)
+                to_remove.add(sid)
+                old = pinned
+                pinned = [x for x in pinned if x not in to_remove]
+                removed_any = pinned != old
+            if removed_any:
                 atomic_write_json(pinned_path, pinned)
 
         self.send_json({
@@ -1211,7 +1274,10 @@ class GalleryHandler(BaseHTTPRequestHandler):
         })
 
     def serve_conversation_detail(self, conv_id):
-        filepath = cache.file_map.get(conv_id) or find_filepath_by_id(conv_id)
+        with CACHE_LOCK:
+            filepath = cache.file_map.get(conv_id)
+        if not filepath:
+            filepath = find_filepath_by_id(conv_id)
         if not filepath:
             self.send_json({'error': 'Not found', 'id': conv_id}, 404)
             return
@@ -1224,7 +1290,8 @@ class GalleryHandler(BaseHTTPRequestHandler):
         else:
             messages = extract_messages(filepath)
         # Find meta from cache
-        meta = next((s for s in cache.sessions if s['id'] == conv_id), None)
+        with CACHE_LOCK:
+            meta = next((s for s in cache.sessions if s['id'] == conv_id), None)
         self.send_json({
             'id': conv_id,
             'metadata': meta,
@@ -1233,15 +1300,16 @@ class GalleryHandler(BaseHTTPRequestHandler):
         })
 
     def _sync_label_to_openclaw(self, conv_id, label):
-        """Sync Gallery title to OpenClaw session label in sessions.json.
+        """Sync OpenClaw Chat History title to OpenClaw session label in sessions.json.
 
         The read-modify-write of sessions.json is serialized with SESSIONS_LOCK
-        so concurrent Gallery requests can't lose each other's updates (OpenClaw
+        so concurrent OpenClaw Chat History requests can't lose each other's updates (OpenClaw
         itself is an external writer and can still race — a known tradeoff of
         the dual-write design)."""
         try:
             # Find this session in cache to get sessionId and sessionKey
-            meta = next((s for s in cache.sessions if s['id'] == conv_id), None)
+            with CACHE_LOCK:
+                meta = next((s for s in cache.sessions if s['id'] == conv_id), None)
             if not meta:
                 return
             sid = meta.get('sessionId', '')
@@ -1281,17 +1349,18 @@ class GalleryHandler(BaseHTTPRequestHandler):
                         json.dump(data, f, ensure_ascii=False, indent=2)
                     os.replace(tmp, cache.SESSIONS_JSON)
         except Exception:
-            pass  # Non-critical: Gallery still works without this sync
+            pass  # Non-critical: OpenClaw Chat History still works without this sync
 
     def _sync_pin_to_openclaw(self, conv_id, is_pinned):
-        """Sync Gallery pin state to OpenClaw sessions.json (`pinnedAt`).
+        """Sync OpenClaw Chat History pin state to OpenClaw sessions.json (`pinnedAt`).
 
         Matches strictly by sessionId (never by sessionKey alone): multiple
         historical sessions can share one sessionKey, so key-based matching
         could pin the wrong (live) conversation in OpenClaw.
         """
         try:
-            meta = next((s for s in cache.sessions if s['id'] == conv_id), None)
+            with CACHE_LOCK:
+                meta = next((s for s in cache.sessions if s['id'] == conv_id), None)
             if not meta:
                 return
             sid = meta.get('sessionId', '')
@@ -1317,7 +1386,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
                         json.dump(data, f, ensure_ascii=False, indent=2)
                     os.replace(tmp, cache.SESSIONS_JSON)
         except Exception:
-            pass  # Non-critical: Gallery pin still works without this sync
+            pass  # Non-critical: OpenClaw Chat History pin still works without this sync
 
     def update_title(self, conv_id):
         content_length = int(self.headers.get('Content-Length', 0))
@@ -1354,19 +1423,20 @@ class GalleryHandler(BaseHTTPRequestHandler):
         # 双写 OpenClaw：置顶状态与 sessions.json 的 pinnedAt 联动（同标题同步模式）
         self._sync_pin_to_openclaw(conv_id, action == 'pinned')
         # 立即更新内存态，下次 /api/conversations 即为最新
-        if action == 'pinned':
-            cache.pinned_set.add(conv_id)
-        else:
-            cache.pinned_set.discard(conv_id)
-        for s in cache.sessions:
-            if s['id'] == conv_id:
-                s['pinned'] = (action == 'pinned')
-                break
+        with CACHE_LOCK:
+            if action == 'pinned':
+                cache.pinned_set.add(conv_id)
+            else:
+                cache.pinned_set.discard(conv_id)
+            for s in cache.sessions:
+                if s['id'] == conv_id:
+                    s['pinned'] = (action == 'pinned')
+                    break
         self.send_json({'ok': True, 'action': action, 'pinned': pinned})
 
     # ---- stats scan caches ----
     # Class-level, NOT instance-level: every HTTP request creates a fresh
-    # GalleryHandler (protocol_version=HTTP/1.0), so instance attributes would
+    # HistoryHandler (protocol_version=HTTP/1.0), so instance attributes would
     # never survive between requests and the 120s cache would be dead code.
     _stats_scan_ts = 0.0
     _stats_scan_cache = None
@@ -1465,12 +1535,12 @@ class GalleryHandler(BaseHTTPRequestHandler):
         caching useless); covers the same file set as the conversation list,
         including trajectory-only sessions (mostly Feishu)."""
         now = time.time()
-        if now - GalleryHandler._stats_scan_ts < 120 and GalleryHandler._stats_scan_cache is not None:
-            return GalleryHandler._stats_scan_cache
+        if now - HistoryHandler._stats_scan_ts < 120 and HistoryHandler._stats_scan_cache is not None:
+            return HistoryHandler._stats_scan_cache
         with STATS_SCAN_LOCK:
             now = time.time()
-            if now - GalleryHandler._stats_scan_ts < 120 and GalleryHandler._stats_scan_cache is not None:
-                return GalleryHandler._stats_scan_cache
+            if now - HistoryHandler._stats_scan_ts < 120 and HistoryHandler._stats_scan_cache is not None:
+                return HistoryHandler._stats_scan_cache
             daily = {}          # date -> tokens (reported + estimated fallback)
             thinking = {}       # level -> count
             tools = {}          # tool name -> count
@@ -1567,8 +1637,8 @@ class GalleryHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             result = {'daily': daily, 'thinking': thinking, 'tools': tools, 'skills': skills}
-            GalleryHandler._stats_scan_cache = result
-            GalleryHandler._stats_scan_ts = now
+            HistoryHandler._stats_scan_cache = result
+            HistoryHandler._stats_scan_ts = now
             return result
 
     def _streak_days(self, dates):
@@ -1613,12 +1683,12 @@ class GalleryHandler(BaseHTTPRequestHandler):
         covers trajectory-only sessions too. Timestamps are normalized to aware
         datetimes so a naive/aware mix can never crash the stats endpoint."""
         now = time.time()
-        if now - GalleryHandler._segment_scan_ts < 120 and GalleryHandler._segment_scan_cache is not None:
-            return GalleryHandler._segment_scan_cache
+        if now - HistoryHandler._segment_scan_ts < 120 and HistoryHandler._segment_scan_cache is not None:
+            return HistoryHandler._segment_scan_cache
         with STATS_SCAN_LOCK:
             now = time.time()
-            if now - GalleryHandler._segment_scan_ts < 120 and GalleryHandler._segment_scan_cache is not None:
-                return GalleryHandler._segment_scan_cache
+            if now - HistoryHandler._segment_scan_ts < 120 and HistoryHandler._segment_scan_cache is not None:
+                return HistoryHandler._segment_scan_cache
             max_seg = 0
             for fp, kind in self._iter_stats_files():
                 times = []
@@ -1667,16 +1737,18 @@ class GalleryHandler(BaseHTTPRequestHandler):
                 seg_len = (dts[-1] - seg_start).total_seconds()
                 if seg_len > max_seg:
                     max_seg = seg_len
-            GalleryHandler._segment_scan_cache = max_seg
-            GalleryHandler._segment_scan_ts = now
+            HistoryHandler._segment_scan_cache = max_seg
+            HistoryHandler._segment_scan_ts = now
             return max_seg
 
     def serve_stats(self):
-        total = len(cache.sessions)
-        total_msgs = sum(s.get('userMessageCount', 0) + s.get('assistantMessageCount', 0) for s in cache.sessions)
-        reported_tokens = sum(s.get('totalTokens', 0) for s in cache.sessions)
-        estimated_tokens = sum(s.get('estimatedTokens', 0) for s in cache.sessions)
-        total_chars = sum(s.get('totalChars', 0) for s in cache.sessions)
+        with CACHE_LOCK:
+            sessions = list(cache.sessions)
+        total = len(sessions)
+        total_msgs = sum(s.get('userMessageCount', 0) + s.get('assistantMessageCount', 0) for s in sessions)
+        reported_tokens = sum(s.get('totalTokens', 0) for s in sessions)
+        estimated_tokens = sum(s.get('estimatedTokens', 0) for s in sessions)
+        total_chars = sum(s.get('totalChars', 0) for s in sessions)
 
         # Try real GLM data from arkcli. Re-read the cache file when its mtime
         # changed since the last fetch, so cron / manual refresh of
@@ -1698,18 +1770,18 @@ class GalleryHandler(BaseHTTPRequestHandler):
         # 直接用文件值（reported + estimated）；GLM 模型文件 usage 历史不可靠（~7%），
         # 以火山平台真实总量（arkcli）为准。这样历史缺口被平台补齐，未来文件里的
         # GLM usage 也不会与平台重复计入（GLM 桶不进 total）。
-        file_glm = sum(s.get('tokensGlm', 0) for s in cache.sessions)
-        file_non_glm = sum(s.get('tokensNonGlm', 0) for s in cache.sessions)
+        file_glm = sum(s.get('tokensGlm', 0) for s in sessions)
+        file_non_glm = sum(s.get('tokensNonGlm', 0) for s in sessions)
         if glm_source == 'arkcli' and real_glm:
             total_tokens = file_non_glm + real_glm
         else:
             total_tokens = file_glm + file_non_glm
         types = {}
-        for s in cache.sessions:
+        for s in sessions:
             t = s.get('sessionType', 'unknown')
             types[t] = types.get(t, 0) + 1
         models = {}
-        for s in cache.sessions:
+        for s in sessions:
             m = s.get('model', 'unknown') or 'unknown'
             # Simplify model name (keep in sync with sidebar badge list in index.html)
             if 'glm' in m: m = 'GLM'
@@ -1728,15 +1800,15 @@ class GalleryHandler(BaseHTTPRequestHandler):
             else: m = 'Other'
             models[m] = models.get(m, 0) + 1
         # Date range
-        dates = [s.get('startTime', '') for s in cache.sessions if s.get('startTime')]
+        dates = [s.get('startTime', '') for s in sessions if s.get('startTime')]
         earliest = min(dates) if dates else ''
         latest = max(dates) if dates else ''
         # Codex-style metrics
-        peak_tokens = max((s.get('totalTokensDisplay', s.get('totalTokens', 0)) for s in cache.sessions), default=0)
+        peak_tokens = max((s.get('totalTokensDisplay', s.get('totalTokens', 0)) for s in sessions), default=0)
         # Longest continuous chat segment: split session messages by >30min gaps
         max_duration_sec = self._longest_chat_segment()
         # streaks from session start dates
-        sess_dates = [s.get('startTime', '')[:10] for s in cache.sessions if s.get('startTime')]
+        sess_dates = [s.get('startTime', '')[:10] for s in sessions if s.get('startTime')]
         current_streak, longest_streak = self._streak_days(sess_dates)
         # daily stats: heatmap + thinking levels + tool usage + skill usage
         ds = self._collect_daily_stats()
@@ -1884,8 +1956,8 @@ if __name__ == '__main__':
     cache.load()
 
     port = 18923
-    server = ThreadedHTTPServer(('localhost', port), GalleryHandler)
-    print(f"Gallery v{VERSION} running at http://localhost:{port}/ (threaded, {len(cache.sessions)} conversations cached)")
+    server = ThreadedHTTPServer(('localhost', port), HistoryHandler)
+    print(f"OpenClaw Chat History v{VERSION} running at http://localhost:{port}/ (threaded, {len(cache.sessions)} conversations cached)")
     print(f"Press Ctrl+C to stop.")
     try:
         server.serve_forever()

@@ -1,8 +1,8 @@
-# 💬 Session Gallery · 历史会话浏览器
+# 💬 OpenClaw Chat History · 历史会话浏览器
 
 > 浏览 OpenClaw 所有历史会话：搜索、查看完整对话、AI 自动标题、手动编辑、置顶、删除。
 > 深空紫双主题界面（深色 / 低饱和浅色一键切换）。
-> 当前版本：v1.15.2
+> 当前版本：v1.15.3
 
 ## 界面预览
 
@@ -27,7 +27,7 @@
 | 🤖 AI 自动标题 | 根据前 6 条消息自动生成 5-15 字标题，永久保存 |
 | ✏️ 标题双向同步 | 手动改名与 OpenClaw 双向同步，单一数据源不打架 |
 | 🏷️ 类型筛选 | 全部 / 网页对话 / 飞书，一键切换 |
-| 📊 数据统计 | Codex 风格用量页：5 指标 / Token 热力图（每日·每周·累计）/ 活动洞察 / 插件 Top5（v1.15.2） |
+| 📊 数据统计 | Codex 风格用量页：5 指标 / Token 热力图（每日·每周·累计）/ 活动洞察 / 插件 Top5（v1.15.3） |
 | 🌗 深浅双主题 | 深空紫深色 + 低饱和浅色，一键切换、记忆选择 |
 | 🗑️ 会话删除 | 一键清理 session 及相关文件（不可恢复） |
 
@@ -38,10 +38,10 @@
 - 按时间倒序排列所有真实对话（自动过滤纯自动任务：cron/子agent/dreaming/空会话）
 - **日期分组**：今天 / 昨天 / 自然月（近3个月）/ 更早
 - **收藏置顶**：hover 出现 📌 按钮置顶，置顶区域淡琥珀色整体显示
-- **置顶双向同步（v1.14.0）**：画廊置顶 ↔ OpenClaw `pinnedAt` 双写 + 刷新收敛（同标题的单一数据源模式）。画廊置顶/取消 → 实时写入 OpenClaw sessions.json；OpenClaw 侧置顶/取消 → 画廊刷新时自动发现并收敛 pinned.json。OpenClaw 不再跟踪的旧会话保留画廊侧置顶状态
+- **置顶双向同步（v1.14.0）**：会话历史置顶 ↔ OpenClaw `pinnedAt` 双写 + 刷新收敛（同标题的单一数据源模式）。会话历史置顶/取消 → 实时写入 OpenClaw sessions.json；OpenClaw 侧置顶/取消 → 会话历史刷新时自动发现并收敛 pinned.json。OpenClaw 不再跟踪的旧会话保留会话历史侧置顶状态
 - 每条显示：标题、时间、消息数、来源图标（💬网页/✈️飞书）、类型标签、模型标签
-- **标题单一数据源（v1.9.0+）**：会话标题以 OpenClaw sessions.json 为权威。画廊显示优先级：手动改过的标题（任一侧）> OpenClaw 标题 > 首条用户消息兜底
-- **双向同步**：画廊手动改名 → 同步写 OpenClaw 的 label + displayName；OpenClaw 侧改名 → 画廊刷新时自动发现并收敛镜像表（titles.json）
+- **标题单一数据源（v1.9.0+）**：会话标题以 OpenClaw sessions.json 为权威。会话历史显示优先级：手动改过的标题（任一侧）> OpenClaw 标题 > 首条用户消息兜底
+- **双向同步**：会话历史手动改名 → 同步写 OpenClaw 的 label + displayName；OpenClaw 侧改名 → 会话历史刷新时自动发现并收敛镜像表（titles.json）
 - **AI 自动生成标题（v1.10.0）**：用前 6 条消息调模型总结（5-15 字）。**v1.15.0 起补位同步**：仅当 OpenClaw 对该会话没有任何标题（label/displayName/subject 全空）时，AI 标题才同步写入 sessions.json 补位；OpenClaw 已有标题则绝不覆盖，避免污染 OpenClaw 原生命名
 - 搜索也覆盖 OpenClaw 标题
 - 滚动到底部自动加载更多（每页 50 条）
@@ -74,13 +74,13 @@
 
 ### 五、数据统计
 
-- 点击标题栏 📊 图标弹出统计面板（v1.15.2 起为 Codex 个人用量页风格）
+- 点击标题栏 📊 图标弹出统计面板（v1.15.3 起为 Codex 个人用量页风格）
 - **5 指标栏**：累计 Token 数（arkcli 真实 GLM 数据时标注「截至 MM/DD」）/ 峰值 Token 数 / 最长聊天时长 / 当前连续天数 / 最长连续天数
 - **Token 活动热力图**：每日（GitHub 贡献图，分级按数据分位数动态计算）/ 每周柱状 / 累计折线，三视图可切换，hover 显示具体值
 - **活动洞察**：最常用推理强度 / Skill 使用数 / 已探索工具 / 工具调用总数 / 会话数 / 消息数
 - **最常用插件 Top5**：Skill（SKILL.md 访问）与插件工具合并排序
 - 用户区显示数据范围与「更新于 HH:MM」（数据接口 no-store，每次打开均为实时数据）
-- **核算口径（v1.15.2）**：非 GLM 模型（DeepSeek/Kimi/Qwen…）用会话文件真实 usage（覆盖 99%+）；GLM 以火山平台真实总量（arkcli，cron 每日刷新）为准——`total = 文件非GLM + 平台GLM真实`，历史缺口补齐、未来文件 usage 不重复计入；arkcli 数据失效时回退文件估算（≈）
+- **核算口径（v1.15.3）**：非 GLM 模型（DeepSeek/Kimi/Qwen…）用会话文件真实 usage（覆盖 99%+）；GLM 以火山平台真实总量（arkcli，cron 每日刷新）为准——`total = 文件非GLM + 平台GLM真实`，历史缺口补齐、未来文件 usage 不重复计入；arkcli 数据失效时回退文件估算（≈）
 
 ### 六、标题管理
 
@@ -178,4 +178,4 @@ A: 标题生成失败会 fallback 到取第一条用户消息前 50 字。可以
 A: 能，大小写不敏感，中英文都支持。
 
 **Q: 为什么有些会话只有飞书标签没有网页标签？**
-A: 这些是飞书渠道的会话，部分只有 `.trajectory.jsonl` 没有 `.jsonl` 文件，属于 OpenClaw 正常行为，Gallery 会通过 trajectory 解析恢复内容。
+A: 这些是飞书渠道的会话，部分只有 `.trajectory.jsonl` 没有 `.jsonl` 文件，属于 OpenClaw 正常行为，OpenClaw Chat History 会通过 trajectory 解析恢复内容。

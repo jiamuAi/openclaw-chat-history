@@ -4,7 +4,7 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CACHE_FILE="$APP_DIR/.arkcli_glm_cache.json"
 
 # 时间范围：最近 6 个自然月（usage plan-details 的历史窗口上限，end 距今 ≤180 天）。
-# gallery 会话历史当前跨 3.4 个月，6 个月窗口可覆盖全部；按月分片拉取再汇总，
+# 会话历史当前跨 3.4 个月，6 个月窗口可覆盖全部；按月分片拉取再汇总，
 # 使 glm_total = GLM 全量真实累计（而非仅当月），跨月数字不会缩水。
 START_MONTH=$(python3 -c "
 from datetime import date

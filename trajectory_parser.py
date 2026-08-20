@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Trajectory parser for OpenClaw Session Gallery.
+Trajectory parser for OpenClaw Chat History.
 
 Parses .trajectory.jsonl trace event files into standard message format.
 Includes a disk cache layer to avoid re-parsing on every server restart.
